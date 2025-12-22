@@ -217,13 +217,13 @@ type ParagraphFeedback = ParagraphEdit & {
           </div>
 
           <!-- Next Editor Button (only if not last editor) -->
-          @if (!isLastEditor) {
+          @if (!isLastEditor && !showFinalOutput) {
             <div class="next-editor-actions">
               <button 
                 type="button"
                 class="next-editor-btn"
                 (click)="onNextEditor(); $event.stopPropagation()"
-                [disabled]="!allParagraphsDecided || isGenerating">
+                [disabled]="!allParagraphsDecided || isGenerating || showFinalOutput">
                 @if (isGenerating) {
                   <span class="spinner"></span>
                 }
