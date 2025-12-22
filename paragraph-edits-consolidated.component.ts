@@ -115,8 +115,10 @@ type ParagraphFeedback = ParagraphEdit & {
                     @for (editorType of objectKeys(paragraph.editorial_feedback); track editorType) {
                       @if (paragraph.editorial_feedback![editorType]?.length) {
                         <div class="editor-type-label">{{ editorType | titlecase }} Editor Feedback</div>
-                        @for (fb of paragraph.editorial_feedback![editorType]; track fb) {
-                          <div class="ef-card">
+                        @for (fb of paragraph.editorial_feedback![editorType]; track fb; let fbIndex = $index) {
+                          <div class="ef-card"
+                            (mouseenter)="onFeedbackHover(paragraph, editorType, fb, fbIndex)"
+                            (mouseleave)="onFeedbackLeave(paragraph)">
                             <div class="ef-header">
                               <span class="ef-issue">{{ fb.issue }}</span>
                               <span
@@ -862,6 +864,13 @@ type ParagraphFeedback = ParagraphEdit & {
       border-radius: 3px;
     }
 
+    :host ::ng-deep .highlight-hover {
+      background: #fbbf24 !important;
+      color: #78350f !important;
+      box-shadow: 0 0 0 2px #f59e0b;
+      transition: all 0.2s ease;
+    }
+
     :host ::ng-deep .strikeout {
       text-decoration: line-through;
     }
@@ -1166,6 +1175,9 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
   @Output('generateFinal') generateFinal = new EventEmitter<void>();
   @Output('nextEditor') nextEditor = new EventEmitter<void>();
 
+  // Hover state tracking
+  private hoveredFeedback: { paragraphIndex: number, editorType: string, feedbackIndex: number } | null = null;
+
   constructor(private cdr: ChangeDetectorRef) {}
 
   get allParagraphsDecided(): boolean {
@@ -1275,19 +1287,14 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     this.paragraphEdits.forEach((p: any, idx: number) => {
       // ensure index is set
       if (p.index === undefined || p.index === null) p.index = idx;
-      // Clear display properties to ensure default highlighting works
+      // Always clear display properties when new data arrives to ensure default highlighting works
       // This ensures highlightAllFeedbacks() always generates fresh highlights with yellow for unreviewed
-      if (p.displayOriginal === undefined && p.displayEdited === undefined) {
-        // Don't set display properties - let template call highlightAllFeedbacks() directly
+      // Only preserve display properties if they were set by user hover actions (handled separately)
+      if (!p._hoverActive) {
+        // When not in hover state, clear display properties to show fresh highlights
         // This ensures default yellow highlighting shows for unreviewed feedback
-      } else {
-        // If display properties exist but we're getting new data, clear them to refresh highlights
-        // Only keep them if they were explicitly set by user actions (which we'll handle in applyEditorialFix/rejectEditorialFeedback)
-        if (this.isGenerating) {
-          // When loading new editor, clear display properties to show fresh highlights
-          p.displayOriginal = undefined;
-          p.displayEdited = undefined;
-        }
+        p.displayOriginal = undefined;
+        p.displayEdited = undefined;
       }
     });
   }
@@ -1537,6 +1544,17 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     
     // Then approve all feedback
     this.approveAllFeedback();
+    
+    // Clear hover state and display properties to force re-highlighting
+    this.hoveredFeedback = null;
+    this.paragraphEdits.forEach((para: any) => {
+      para._hoverActive = false;
+      para.displayOriginal = undefined;
+      para.displayEdited = undefined;
+    });
+    
+    // Force change detection to update highlights
+    this.cdr.detectChanges();
   }
 
   /** Unified Decline All: reject all feedback items and decline all paragraphs */
@@ -1555,6 +1573,17 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     
     // Then reject all feedback
     this.rejectAllFeedback();
+    
+    // Clear hover state and display properties to force re-highlighting
+    this.hoveredFeedback = null;
+    this.paragraphEdits.forEach((para: any) => {
+      para._hoverActive = false;
+      para.displayOriginal = undefined;
+      para.displayEdited = undefined;
+    });
+    
+    // Force change detection to update highlights
+    this.cdr.detectChanges();
   }
 
   // derived minimal shape used for bulk operations
@@ -1607,6 +1636,67 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
   /** Handle next editor button click */
   onNextEditor(): void {
     this.nextEditor.emit();
+  }
+
+  /** Handle feedback card hover - highlight corresponding issue/fix in paragraph text */
+  onFeedbackHover(para: any, editorType: string, fb: any, fbIndex: number): void {
+    if (this.showFinalOutput) return;
+    
+    // Mark paragraph as in hover state
+    para._hoverActive = true;
+    this.hoveredFeedback = {
+      paragraphIndex: para.index,
+      editorType: editorType,
+      feedbackIndex: fbIndex
+    };
+    
+    // Generate highlights with this specific feedback item highlighted
+    const highlighted = this.highlightSingleFeedback(para, editorType, fb);
+    para.displayOriginal = highlighted.original;
+    para.displayEdited = highlighted.edited;
+    
+    this.cdr.detectChanges();
+  }
+
+  /** Handle feedback card mouse leave - restore normal highlighting */
+  onFeedbackLeave(para: any): void {
+    if (this.showFinalOutput) return;
+    
+    // Clear hover state
+    para._hoverActive = false;
+    this.hoveredFeedback = null;
+    
+    // Clear display properties to restore default highlighting
+    para.displayOriginal = undefined;
+    para.displayEdited = undefined;
+    
+    this.cdr.detectChanges();
+  }
+
+  /** Highlight only a single feedback item (for hover effect) */
+  private highlightSingleFeedback(para: ParagraphEdit | ParagraphFeedback, editorType: string, fb: any): { original: string, edited: string } {
+    const originalText = this.stripHtmlSpans((para as any)?.original ?? '');
+    const editedText = this.stripHtmlSpans((para as any)?.edited ?? '');
+
+    let highlightedOriginal = originalText;
+    let highlightedEdited = editedText;
+
+    // Highlight only the hovered feedback item with special hover class
+    const issueText = fb.issue?.trim();
+    if (issueText && highlightedOriginal.includes(issueText)) {
+      const escaped = this.escapeRegex(issueText);
+      const regex = new RegExp(escaped, 'g');
+      highlightedOriginal = highlightedOriginal.replace(regex, `<span class="highlight-yellow highlight-hover">$&</span>`);
+    }
+
+    const fixText = fb.fix?.trim();
+    if (fixText && highlightedEdited.includes(fixText)) {
+      const escaped = this.escapeRegex(fixText);
+      const regex = new RegExp(escaped, 'g');
+      highlightedEdited = highlightedEdited.replace(regex, `<span class="highlight-yellow highlight-hover">$&</span>`);
+    }
+
+    return { original: highlightedOriginal, edited: highlightedEdited };
   }
   
 }
