@@ -250,7 +250,7 @@ type ParagraphFeedback = ParagraphEdit & {
             @if (isGeneratingFinal) {
               <span class="spinner"></span>
             }
-            {{ isGeneratingFinal ? 'Generating...' : 'Run Final Output' }}
+            {{ isGeneratingFinal ? 'Generating Final Output...' : 'Generate Final Output' }}
           </button>
           @if (!allParagraphsDecided) {
             <p class="final-output-hint">
@@ -1188,9 +1188,14 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
   constructor(private cdr: ChangeDetectorRef) {}
 
   get allParagraphsDecided(): boolean {
-    // Check both paragraph-level decisions and feedback decisions
-    const paragraphsDecided = allParagraphsDecided(this.paragraphEdits);
+    // If all feedback is decided, buttons should enable (even if paragraphs aren't explicitly approved)
+    // This allows "Approve All" / "Reject All" to enable buttons when they only affect feedback items
     const feedbackDecided = this.allParagraphFeedbackDecided;
+    if (feedbackDecided) {
+      return true; // Enable buttons when all feedback is decided
+    }
+    // Otherwise, check both paragraph-level and feedback decisions
+    const paragraphsDecided = allParagraphsDecided(this.paragraphEdits);
     return paragraphsDecided && feedbackDecided;
   }
 
@@ -1361,6 +1366,9 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     // Clear display properties so highlightAllFeedbacks() handles all highlighting
     para.displayOriginal = undefined;
     para.displayEdited = undefined;
+    
+    // Force change detection to update button states (enable/disable Next Editor and Generate Final Output)
+    this.cdr.detectChanges();
   }
 
   /** Remove any existing HTML tags from text so we highlight against raw text */
@@ -1384,6 +1392,9 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     // Clear display properties so highlightAllFeedbacks() handles all highlighting
     para.displayOriginal = undefined;
     para.displayEdited = undefined;
+    
+    // Force change detection to update button states (enable/disable Next Editor and Generate Final Output)
+    this.cdr.detectChanges();
   }
 
 
