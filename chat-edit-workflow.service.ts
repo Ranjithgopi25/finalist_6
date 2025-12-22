@@ -775,8 +775,11 @@ export class ChatEditWorkflowService {
           if (data.current_editor) {
             this.currentEditor = data.current_editor;
             this.currentEditorIndex = data.editor_index || 0;
-            this.totalEditors = data.total_editors || this.totalEditors;
-            this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || 1) - 1;
+            // Ensure total_editors is set correctly - use backend value or fallback to selected editors count
+            this.totalEditors = data.total_editors || this.totalEditors || this.currentState.selectedEditors.length;
+            // Calculate isLastEditor: editor_index is 0-based, so last editor is at index (total_editors - 1)
+            // If editor_index >= total_editors - 1, it's the last editor
+            this.isLastEditor = this.currentEditorIndex >= (this.totalEditors - 1);
           }
           
           const completedEditor = editorProgressList.find(e => e.editorId === data.current_editor || e.editorId === data.editor);
@@ -1405,7 +1408,55 @@ export class ChatEditWorkflowService {
   
   /** Check if all paragraphs have been decided */
   get allParagraphsDecided(): boolean {
-    return allParagraphsDecided(this.currentState.paragraphEdits);
+    const paragraphEdits = this.currentState.paragraphEdits;
+    
+    // First check if all feedback is decided (matches component logic)
+    // This allows "Approve All" / "Reject All" to enable buttons when they only affect feedback items
+    const feedbackDecided = this.allParagraphFeedbackDecided(paragraphEdits);
+    if (feedbackDecided) {
+      return true; // Enable buttons when all feedback is decided
+    }
+    
+    // Otherwise, check both paragraph-level and feedback decisions
+    const paragraphsDecided = allParagraphsDecided(paragraphEdits);
+    return paragraphsDecided && feedbackDecided;
+  }
+
+  /** Check if all paragraph feedback items are decided */
+  private allParagraphFeedbackDecided(paragraphEdits: ParagraphEdit[]): boolean {
+    if (!paragraphEdits || paragraphEdits.length === 0) {
+      return true; // No feedback to decide
+    }
+    
+    return paragraphEdits.every(para => {
+      // Only check if all editorial feedback items are decided (not paragraph approval)
+      // This allows Next Editor to enable when all feedback is approved/rejected
+      if (!para.editorial_feedback) {
+        return true; // No feedback means nothing to decide
+      }
+      
+      const feedbackTypes = Object.keys(para.editorial_feedback);
+      // If there are no feedback types, consider it decided
+      if (feedbackTypes.length === 0) {
+        return true;
+      }
+      
+      for (const editorType of feedbackTypes) {
+        const feedbacks = (para.editorial_feedback as any)[editorType] || [];
+        // If there are no feedbacks for this editor type, skip it
+        if (feedbacks.length === 0) {
+          continue;
+        }
+        for (const fb of feedbacks) {
+          // Feedback is decided if approved is true or false (not null/undefined)
+          if (fb.approved === null || fb.approved === undefined) {
+            return false;
+          }
+        }
+      }
+      
+      return true;
+    });
   }
 
   /** Get paragraphs that require user review (excludes auto-approved) */
@@ -1445,6 +1496,12 @@ export class ChatEditWorkflowService {
     // Update service's threadId if it was null and we got it from message
     if (!this.threadId && threadIdFromMessage) {
       this.threadId = threadIdFromMessage;
+    }
+
+    // SYNC STATE FIRST before checking allParagraphsDecided
+    // This ensures that approve/reject all actions are reflected in service state
+    if (paragraphEdits && paragraphEdits.length > 0) {
+      this.syncParagraphEditsFromMessage(paragraphEdits);
     }
 
     if (!this.allParagraphsDecided) {
@@ -1531,9 +1588,10 @@ export class ChatEditWorkflowService {
                 
                 // Handle all_complete
                 if (data.type === 'all_complete') {
-                  // Mark as last editor to show "Generate Final Output" button
-                  this.isLastEditor = true;
-                  this.currentEditorIndex = this.totalEditors;
+                  // All editors are complete - calculate isLastEditor based on current editor index
+                  // Don't override currentEditorIndex, just ensure isLastEditor is correctly set
+                  // If we're at the last editor (index >= totalEditors - 1), mark as last
+                  this.isLastEditor = this.currentEditorIndex >= (this.totalEditors - 1);
                   
                   const updateMessage: Message = {
                     role: 'assistant',
@@ -1568,8 +1626,11 @@ export class ChatEditWorkflowService {
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
                     this.currentEditorIndex = data.editor_index || 0;
-                    this.totalEditors = data.total_editors || this.totalEditors;
-                    this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || 1) - 1;
+                    // Ensure total_editors is set correctly - use backend value or keep existing
+                    this.totalEditors = data.total_editors || this.totalEditors || this.currentState.selectedEditors.length;
+                    // Calculate isLastEditor: editor_index is 0-based, so last editor is at index (total_editors - 1)
+                    // If editor_index >= total_editors - 1, it's the last editor
+                    this.isLastEditor = this.currentEditorIndex >= (this.totalEditors - 1);
                   }
 
                   // Process paragraph edits
@@ -1781,6 +1842,28 @@ export class ChatEditWorkflowService {
       const headerHtml = convertMarkdownToHtml(headerLines.join('\n'));
       const finalHtml = convertMarkdownToHtml(finalArticle);
       const finalArticleHtml = `${headerHtml}<div class="result-section"><h4 class="result-title">Final Revised Article</h4><div class="assistant-message revised-content-formatted">${finalHtml}</div></div>`;
+      
+      // Update paragraph edits message to indicate final output has been generated
+      const updateMessage: Message = {
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+        isHtml: false,
+        editWorkflow: {
+          step: 'awaiting_approval',
+          paragraphEdits: [...this.currentState.paragraphEdits],
+          showCancelButton: false,
+          showSimpleCancelButton: true,
+          threadId: this.threadId,
+          currentEditor: this.currentEditor,
+          isSequentialMode: this.isSequentialMode,
+          isLastEditor: this.isLastEditor,
+          currentEditorIndex: this.currentEditorIndex,
+          totalEditors: this.totalEditors,
+          finalOutputGenerated: true
+        }
+      };
+      this.messageSubject.next({ type: 'update', message: updateMessage });
       
       const finalMessage: Message = {
         role: 'assistant',
