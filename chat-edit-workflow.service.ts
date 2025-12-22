@@ -771,9 +771,11 @@ export class ChatEditWorkflowService {
           
           if (data.current_editor) {
             this.currentEditor = data.current_editor;
-            this.currentEditorIndex = data.editor_index || 0;
-            this.totalEditors = data.total_editors || this.totalEditors;
-            this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || 1) - 1;
+            this.currentEditorIndex = data.editor_index ?? 0;
+            // Use total_editors from data if available, otherwise keep existing totalEditors, fallback to selectedEditors length
+            this.totalEditors = data.total_editors ?? this.totalEditors ?? normalizedEditorIds.length;
+            // Calculate isLastEditor with proper validation
+            this.isLastEditor = this.calculateIsLastEditor(this.currentEditorIndex, this.totalEditors);
           }
           
           const completedEditor = editorProgressList.find(e => e.editorId === data.current_editor || e.editorId === data.editor);
@@ -1467,6 +1469,31 @@ export class ChatEditWorkflowService {
     // Combine all original paragraphs
     return sortedEdits.map(p => p.original).filter(p => p && p.trim()).join('\n\n');
   }
+
+  /** Calculate isLastEditor flag with proper validation (matches Guided Journey logic) */
+  private calculateIsLastEditor(editorIndex: number | null | undefined, totalEditors: number | null | undefined): boolean {
+    // Validate inputs: ensure both are valid numbers
+    const validEditorIndex = (typeof editorIndex === 'number' && editorIndex >= 0) ? editorIndex : null;
+    const validTotalEditors = (typeof totalEditors === 'number' && totalEditors > 0) ? totalEditors : null;
+    
+    // If either is invalid, default to false (not last editor)
+    if (validEditorIndex === null || validTotalEditors === null) {
+      console.warn('[ChatEditWorkflowService] Invalid editor index or total editors:', { editorIndex, totalEditors });
+      return false;
+    }
+    
+    // 0-based indexing: last editor is at index (totalEditors - 1)
+    // For 4 editors (indices 0,1,2,3): isLastEditor is true only at index 3
+    const isLast = validEditorIndex >= (validTotalEditors - 1);
+    
+    console.log('[ChatEditWorkflowService] Calculating isLastEditor:', {
+      editorIndex: validEditorIndex,
+      totalEditors: validTotalEditors,
+      isLastEditor: isLast
+    });
+    
+    return isLast;
+  }
   
   /** Move to next editor in sequential workflow */
   async nextEditor(paragraphEdits: ParagraphEdit[], threadIdFromMessage?: string | null): Promise<void> {
@@ -1571,14 +1598,17 @@ export class ChatEditWorkflowService {
                     this.totalEditors = data.total_editors;
                   }
 
-                  const expectedLastIndex = (this.totalEditors || 1) - 1;
+                  // Validate that we've reached the last editor before marking as complete
+                  const expectedLastIndex = this.totalEditors > 0 ? (this.totalEditors - 1) : 0;
                   if (this.currentEditorIndex < expectedLastIndex) {
                     console.warn('[ChatEditWorkflowService] Received all_complete prematurely. Current:', this.currentEditorIndex, 'Expected:', expectedLastIndex, 'Total:', this.totalEditors);
                     continue;
                   }
                   
+                  // All editors complete - mark as last editor
                   this.isLastEditor = true;
-                  this.currentEditorIndex = this.totalEditors;
+                  // Set currentEditorIndex to the last editor's index (0-based: totalEditors - 1)
+                  this.currentEditorIndex = this.totalEditors > 0 ? (this.totalEditors - 1) : 0;
                   this.isGeneratingNextEditorSubject.next(false);
 
                   const updateMessage: Message = {
@@ -1610,9 +1640,11 @@ export class ChatEditWorkflowService {
 
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
-                    this.currentEditorIndex = data.editor_index || 0;
-                    this.totalEditors = data.total_editors || this.totalEditors;
-                    this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || 1) - 1;
+                    this.currentEditorIndex = data.editor_index ?? 0;
+                    // Use total_editors from data if available, otherwise keep existing totalEditors
+                    this.totalEditors = data.total_editors ?? this.totalEditors ?? this.currentState.selectedEditors.length;
+                    // Calculate isLastEditor with proper validation
+                    this.isLastEditor = this.calculateIsLastEditor(this.currentEditorIndex, this.totalEditors);
                   }
 
                   let newParagraphEdits: ParagraphEdit[] = [];
