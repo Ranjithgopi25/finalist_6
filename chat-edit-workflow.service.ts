@@ -1528,17 +1528,14 @@ export class ChatEditWorkflowService {
         approved: para.approved === true
       }));
 
-      // Prepare paragraph_edits
+      // Prepare paragraph_edits (matching guided journey format - no editorial_feedback, block_type, or level)
       const paragraph_edits_data = paragraphEdits.map(para => ({
         index: para.index,
         original: para.original,
         edited: para.edited,
         tags: para.tags || [],
         autoApproved: para.autoApproved || false,
-        approved: para.approved,
-        block_type: (para as any).block_type || 'paragraph',
-        level: (para as any).level || 0,
-        editorial_feedback: para.editorial_feedback
+        approved: para.approved
       }));
 
       // Get API URL from environment (supports runtime config via window._env)
@@ -1588,40 +1585,55 @@ export class ChatEditWorkflowService {
                 
                 // Handle all_complete (final confirmation from backend that all editors have finished)
                 if (data.type === 'all_complete') {
-                  // Update editor info if provided, but DO NOT override isLastEditor here.
-                  // isLastEditor is derived from editor_complete events using editor_index/total_editors
-                  // to match Guided Journey behavior.
+                  // Update editor info if provided
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
                   }
                   if (data.total_editors !== undefined && data.total_editors !== null) {
                     this.totalEditors = data.total_editors;
                   }
+                  
+                  // Validate that we've actually processed all editors before accepting all_complete
+                  // Check if all_complete includes editor_index, or use currentEditorIndex
+                  const completedEditorIndex = data.editor_index !== undefined ? data.editor_index : this.currentEditorIndex;
+                  const expectedLastIndex = (this.totalEditors || 1) - 1; // 0-based last index
+                  
+                  // Only accept all_complete if the completed editor index is at or past the last editor
+                  // This prevents premature all_complete events from hiding the Next Editor button
+                  if (completedEditorIndex < expectedLastIndex) {
+                    console.warn('[ChatEditWorkflowService] Received all_complete prematurely. Completed editor index:', completedEditorIndex, 'Expected last index:', expectedLastIndex, 'Total editors:', this.totalEditors);
+                    // Don't process this all_complete - skip to next line in the stream
+                    // The editor_complete handler will process the actual editor completion
+                  } else {
+                    // We've processed all editors, so all_complete is valid
+                    // Mark as last editor to show "Generate Final Output" button only (matching Guided Journey behavior)
+                    this.isLastEditor = true;
+                    this.currentEditorIndex = this.totalEditors;
 
-                  // Reset generating state before emitting update message
-                  this.isGeneratingNextEditorSubject.next(false);
+                    // Reset generating state before emitting update message
+                    this.isGeneratingNextEditorSubject.next(false);
 
-                  const updateMessage: Message = {
-                    role: 'assistant',
-                    content: '',
-                    timestamp: new Date(),
-                    isHtml: false,
-                    editWorkflow: {
-                      step: 'awaiting_approval',
-                      paragraphEdits: [...this.currentState.paragraphEdits],
-                      showCancelButton: false,
-                      showSimpleCancelButton: true,
-                      threadId: this.threadId,
-                      currentEditor: this.currentEditor,
-                      isSequentialMode: this.isSequentialMode,
-                      // Keep existing isLastEditor value from previous editor_complete event
-                      isLastEditor: this.isLastEditor,
-                      currentEditorIndex: this.currentEditorIndex,
-                      totalEditors: this.totalEditors
-                    }
-                  };
-                  this.messageSubject.next({ type: 'update', message: updateMessage });
-                  return;
+                    const updateMessage: Message = {
+                      role: 'assistant',
+                      content: '',
+                      timestamp: new Date(),
+                      isHtml: false,
+                      editWorkflow: {
+                        step: 'awaiting_approval',
+                        paragraphEdits: [...this.currentState.paragraphEdits],
+                        showCancelButton: false,
+                        showSimpleCancelButton: true,
+                        threadId: this.threadId,
+                        currentEditor: this.currentEditor,
+                        isSequentialMode: this.isSequentialMode,
+                        isLastEditor: true, // All editors complete - only show Generate Final Output
+                        currentEditorIndex: this.currentEditorIndex,
+                        totalEditors: this.totalEditors
+                      }
+                    };
+                    this.messageSubject.next({ type: 'update', message: updateMessage });
+                    return;
+                  }
                 }
 
                 // Handle editor_complete (same as initial flow)
