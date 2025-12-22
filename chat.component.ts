@@ -723,11 +723,23 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
             const messageElement = messageElements[messageIndex];
             const paragraphEditsElement = messageElement.querySelector('app-paragraph-edits');
             if (paragraphEditsElement) {
-              paragraphEditsElement.scrollIntoView({ 
-                behavior: 'smooth', 
-                block: 'start',
-                inline: 'nearest'
-              });
+              // Try to find the editorial feedback section first (paragraph feedback)
+              const feedbackSection = paragraphEditsElement.querySelector('.editorial-feedback-list');
+              if (feedbackSection) {
+                // Scroll to the first feedback section
+                (feedbackSection as HTMLElement).scrollIntoView({ 
+                  behavior: 'smooth', 
+                  block: 'start',
+                  inline: 'nearest'
+                });
+              } else {
+                // Fallback to scrolling to the paragraph edits component
+                paragraphEditsElement.scrollIntoView({ 
+                  behavior: 'smooth', 
+                  block: 'start',
+                  inline: 'nearest'
+                });
+              }
             } else {
               // Fallback to scrolling to the message
               messageElement.scrollIntoView({ 
