@@ -774,13 +774,9 @@ export class ChatEditWorkflowService {
           
           if (data.current_editor) {
             this.currentEditor = data.current_editor;
-            // Note: currentEditorIndex is 0-based (0, 1, 2, ...) matching backend editor_index
-            // UI should display as (currentEditorIndex + 1) for user-friendly "Editor 1", "Editor 2", etc.
             this.currentEditorIndex = data.editor_index || 0;
-            // 🔒 totalEditors is locked at initialization - DO NOT update from backend
-            // ❌ DO NOT calculate isLastEditor here - only set on all_complete
-            // ✅ Always false during editor_complete - final state comes from all_complete event
-            this.isLastEditor = false;
+            this.totalEditors = data.total_editors || this.totalEditors;
+            this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || this.totalEditors || 1) - 1;
           }
           
           const completedEditor = editorProgressList.find(e => e.editorId === data.current_editor || e.editorId === data.editor);
@@ -1585,7 +1581,6 @@ export class ChatEditWorkflowService {
                 
                 if (data.type === 'all_complete') {
                   this.isGeneratingNextEditorSubject.next(false);
-                  // ✅ ONLY PLACE isLastEditor can be true - backend explicitly signals workflow completion
                   this.isLastEditor = true;
                   // Set to totalEditors (0-based: last editor is at index totalEditors - 1, but we use totalEditors for display consistency)
                   this.currentEditorIndex = this.totalEditors;
@@ -1619,13 +1614,9 @@ export class ChatEditWorkflowService {
 
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
-                    // Note: currentEditorIndex is 0-based (0, 1, 2, ...) matching backend editor_index
-                    // UI should display as (currentEditorIndex + 1) for user-friendly "Editor 1", "Editor 2", etc.
                     this.currentEditorIndex = data.editor_index || 0;
-                    // 🔒 totalEditors is locked at initialization - DO NOT update from backend
-                    // ❌ DO NOT calculate isLastEditor here - only set on all_complete
-                    // ✅ Always false during editor_complete - final state comes from all_complete event
-                    this.isLastEditor = false;
+                    this.totalEditors = data.total_editors || this.totalEditors;
+                    this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || this.totalEditors || 1) - 1;
                   }
 
                   let newParagraphEdits: ParagraphEdit[] = [];
