@@ -1158,18 +1158,19 @@ export class ChatEditWorkflowService {
         content: '', // Content will be rendered by Angular component
         timestamp: new Date(),
         isHtml: false,
-        editWorkflow: {
-          step: 'awaiting_approval',
-          paragraphEdits: paragraphEdits,
-          showCancelButton: false,
-          showSimpleCancelButton: true,
-          threadId: this.threadId,
-          currentEditor: this.currentEditor,
-          isSequentialMode: this.isSequentialMode,
-          isLastEditor: this.isLastEditor,
-          currentEditorIndex: this.currentEditorIndex,
-          totalEditors: this.totalEditors
-        }
+      editWorkflow: {
+        step: 'awaiting_approval',
+        paragraphEdits: paragraphEdits,
+        showCancelButton: false,
+        showSimpleCancelButton: true,
+        threadId: this.threadId,
+        currentEditor: this.currentEditor,
+        isSequentialMode: this.isSequentialMode,
+        // ⚠️ UI MUST use isLastEditor flag - DO NOT infer from currentEditorIndex/totalEditors
+        isLastEditor: this.isLastEditor,
+        currentEditorIndex: this.currentEditorIndex,
+        totalEditors: this.totalEditors
+      }
       };
       this.messageSubject.next({ type: 'result', message: paragraphMessage });
     } else if (revisedContent && !paragraphEdits) {
@@ -1376,6 +1377,7 @@ export class ChatEditWorkflowService {
         threadId: this.threadId,
         currentEditor: this.currentEditor,
         isSequentialMode: this.isSequentialMode,
+        // ⚠️ UI MUST use isLastEditor flag - DO NOT infer from currentEditorIndex/totalEditors
         isLastEditor: this.isLastEditor,
         currentEditorIndex: this.currentEditorIndex,
         totalEditors: this.totalEditors
@@ -1712,6 +1714,7 @@ export class ChatEditWorkflowService {
                       threadId: this.threadId,
                       currentEditor: this.currentEditor,
                       isSequentialMode: this.isSequentialMode,
+                      // ⚠️ UI MUST use isLastEditor flag - DO NOT infer from currentEditorIndex/totalEditors
                       isLastEditor: this.isLastEditor,
                       currentEditorIndex: this.currentEditorIndex,
                       totalEditors: this.totalEditors,
