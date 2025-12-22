@@ -2407,12 +2407,14 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   onGenerateFinalArticle(message: Message): void {
-    // Sync paragraphEdits from message to service before generating final article
     if (message.editWorkflow?.paragraphEdits && message.editWorkflow.paragraphEdits.length > 0) {
       this.editWorkflowService.syncParagraphEditsFromMessage(message.editWorkflow.paragraphEdits);
     }
     
-    // Call the service to generate final article
+    if (message.editWorkflow?.threadId) {
+      this.editWorkflowService.syncThreadIdFromMessage(message.editWorkflow.threadId);
+    }
+    
     this.editWorkflowService.generateFinalArticle();
   }
 
