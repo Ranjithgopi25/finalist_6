@@ -1476,7 +1476,8 @@ export class ChatEditWorkflowService {
         isSequentialMode: this.isSequentialMode,
         isLastEditor: this.isLastEditor,
         currentEditorIndex: this.currentEditorIndex,
-        totalEditors: this.totalEditors
+        totalEditors: this.totalEditors,
+        isGeneratingNextEditor: true // Indicate loading for next editor
       }
     };
     this.messageSubject.next({ type: 'update', message: loadingMessage });
@@ -1642,8 +1643,8 @@ export class ChatEditWorkflowService {
                         autoApproved: autoApproved,
                         approved: approved,
                         editorial_feedback: editorial_feedback,
-                        displayOriginal: originalText,
-                        displayEdited: editedText
+                        displayOriginal: undefined, // Clear to ensure default highlighting works
+                        displayEdited: undefined // Clear to ensure default highlighting works
                       } as ParagraphEdit;
                     });
                   }
@@ -1662,6 +1663,9 @@ export class ChatEditWorkflowService {
                     paragraphEdits: newParagraphEdits
                   });
 
+                  // Reset generating state before dispatching new paragraph edits
+                  this.isGeneratingNextEditorSubject.next(false);
+
                   // Dispatch paragraph edits message with sequential metadata (use update to update same message)
                   const paragraphMessage: Message = {
                     role: 'assistant',
@@ -1678,7 +1682,8 @@ export class ChatEditWorkflowService {
                       isSequentialMode: this.isSequentialMode,
                       isLastEditor: this.isLastEditor,
                       currentEditorIndex: this.currentEditorIndex,
-                      totalEditors: this.totalEditors
+                      totalEditors: this.totalEditors,
+                      isGeneratingNextEditor: false // No longer generating
                     }
                   };
                   // Use 'update' type to update the same message instead of creating a new one
