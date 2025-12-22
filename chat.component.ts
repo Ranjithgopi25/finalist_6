@@ -601,15 +601,16 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
             console.log('[ChatComponent] Adding regular workflow message');
             this.messages.push(workflowMessage.message);
             
-            // If this message has paragraph edits, scroll to paragraph edits section instead of bottom
+            // If this message has paragraph edits, scroll to top of paragraph edits section (instructions area)
             if (workflowMessage.message.editWorkflow?.paragraphEdits && 
                 workflowMessage.message.editWorkflow.paragraphEdits.length > 0) {
               this.saveCurrentSession();
               this.cdr.detectChanges();
+              // Use longer timeout to ensure DOM is fully rendered, then scroll to top of paragraph edits
               setTimeout(() => {
                 const messageIndex = this.messages.length - 1;
                 this.scrollToParagraphEdits(messageIndex);
-              }, 100);
+              }, 200);
               return;
             }
             
@@ -762,22 +763,24 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
               const messageElement = messageElements[messageIndex];
               const paragraphEditsElement = messageElement.querySelector('app-paragraph-edits');
               if (paragraphEditsElement) {
-                // Try to find the result-title or paragraph-instructions within paragraph edits
-                // This ensures we scroll to the instructions area, not the bottom buttons
-                const titleElement = paragraphEditsElement.querySelector('.result-title') || 
-                                   paragraphEditsElement.querySelector('.paragraph-instructions') ||
-                                   paragraphEditsElement.querySelector('.result-section');
+                // Prioritize finding result-title first (topmost element), then paragraph-instructions
+                // This ensures we scroll to the very top of paragraph edits section
+                const titleElement = paragraphEditsElement.querySelector('.result-title');
+                const instructionsElement = paragraphEditsElement.querySelector('.paragraph-instructions');
+                const sectionElement = paragraphEditsElement.querySelector('.result-section');
                 
-                const targetElement = titleElement || paragraphEditsElement;
+                // Use title element if available (topmost), otherwise instructions, then section
+                const targetElement = titleElement || instructionsElement || sectionElement || paragraphEditsElement;
                 
                 // Calculate position relative to scroll container
                 const containerRect = element.getBoundingClientRect();
                 const elementRect = targetElement.getBoundingClientRect();
                 const relativeTop = elementRect.top - containerRect.top + element.scrollTop;
                 
-                // Scroll container to show the top of paragraph edits instructions with small offset
+                // Scroll container to show the top of paragraph edits with small offset
+                // This ensures the title/instructions are visible at the top
                 element.scrollTo({
-                  top: Math.max(0, relativeTop - 20), // Add small offset from top, ensure non-negative
+                  top: Math.max(0, relativeTop - 20), // Small offset from top
                   behavior: 'smooth'
                 });
               } else {
@@ -787,7 +790,7 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
                 const relativeTop = elementRect.top - containerRect.top + element.scrollTop;
                 
                 element.scrollTo({
-                  top: Math.max(0, relativeTop - 20), // Add small offset from top, ensure non-negative
+                  top: Math.max(0, relativeTop - 20),
                   behavior: 'smooth'
                 });
               }
@@ -796,7 +799,7 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         } catch (err) {
           console.error('Error scrolling to paragraph edits:', err);
         }
-      }, 100); // Delay to ensure DOM is fully ready
+      }, 150); // Slightly longer delay to ensure DOM is fully ready
     });
   }
   
