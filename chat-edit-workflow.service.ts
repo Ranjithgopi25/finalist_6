@@ -1593,19 +1593,20 @@ export class ChatEditWorkflowService {
                     this.totalEditors = data.total_editors;
                   }
                   
-                  // Validate that we've actually processed all editors before accepting all_complete
-                  // Check if all_complete includes editor_index, or use currentEditorIndex
-                  const completedEditorIndex = data.editor_index !== undefined ? data.editor_index : this.currentEditorIndex;
+                  // CRITICAL FIX: Only trust currentEditorIndex which is updated by editor_complete events
+                  // Do NOT trust data.editor_index from all_complete as it may be incorrect, arrive early, or use different indexing
+                  // currentEditorIndex is the ONLY reliable source of truth since it's only updated when editor_complete is processed
                   const expectedLastIndex = (this.totalEditors || 1) - 1; // 0-based last index
                   
-                  // Only accept all_complete if the completed editor index is at or past the last editor
-                  // This prevents premature all_complete events from hiding the Next Editor button
-                  if (completedEditorIndex < expectedLastIndex) {
-                    console.warn('[ChatEditWorkflowService] Received all_complete prematurely. Completed editor index:', completedEditorIndex, 'Expected last index:', expectedLastIndex, 'Total editors:', this.totalEditors);
-                    // Don't process this all_complete - skip to next line in the stream
-                    // The editor_complete handler will process the actual editor completion
+                  // Only accept all_complete if currentEditorIndex indicates we've processed all editors
+                  // This ensures we've actually seen editor_complete events for all editors before accepting all_complete
+                  if (this.currentEditorIndex < expectedLastIndex) {
+                    console.warn('[ChatEditWorkflowService] Received all_complete prematurely. Current editor index:', this.currentEditorIndex, 'Expected last index:', expectedLastIndex, 'Total editors:', this.totalEditors, 'Ignoring all_complete and waiting for editor_complete events');
+                    // Don't process this all_complete - skip it and let editor_complete handle the actual completion
+                    // Continue to next iteration of the loop to process editor_complete
                   } else {
-                    // We've processed all editors, so all_complete is valid
+                    // We've processed all editors (currentEditorIndex >= expectedLastIndex), so all_complete is valid
+                    // This means we've seen editor_complete events for all editors, so it's safe to mark as complete
                     // Mark as last editor to show "Generate Final Output" button only (matching Guided Journey behavior)
                     this.isLastEditor = true;
                     this.currentEditorIndex = this.totalEditors;
