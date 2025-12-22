@@ -1898,27 +1898,9 @@ export class ChatEditWorkflowService {
       // Update paragraph message to show final output (component will handle display)
       const updatedParagraphEdits = [...this.currentState.paragraphEdits];
       
-      // Create final article HTML for separate message
-      const uploadedFileName = this.currentState.uploadedFile?.name;
-      const selectedEditorNames = this.getSelectedEditorNames(this.currentState.selectedEditors);
-      
-      const headerLines: string[] = [
-        '### Quick Start Thought Leadership – Edit Content'
-      ];
-      
-      if (uploadedFileName) {
-        headerLines.push(`_Source: ${uploadedFileName}_`);
-      }
-      
-      if (selectedEditorNames) {
-        headerLines.push(`_Editors Applied: ${selectedEditorNames}_`);
-      }
-      
-      headerLines.push('');
-      
-      const headerHtml = convertMarkdownToHtml(headerLines.join('\n'));
+      // Create final article HTML for separate message (without title and editors info)
       const finalHtml = convertMarkdownToHtml(finalArticle);
-      const finalArticleHtml = `${headerHtml}<div class="result-section"><h4 class="result-title">Final Revised Article</h4><div class="assistant-message revised-content-formatted">${finalHtml}</div></div>`;
+      const finalArticleHtml = `<div class="result-section"><div class="assistant-message revised-content-formatted">${finalHtml}</div></div>`;
       
       // Update paragraph edits message to indicate final output has been generated
       const updateMessage: Message = {
