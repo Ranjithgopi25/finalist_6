@@ -558,22 +558,10 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
                 this.cdr.detectChanges();
                 
                 // Scroll to paragraph edits after update (especially when next editor content arrives)
-                // Use longer timeout and requestAnimationFrame for next editor to ensure DOM is fully updated
-                if (hasNewParagraphEdits) {
-                  // For next editor content, use requestAnimationFrame with longer timeout
-                  requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                      setTimeout(() => {
-                        this.scrollToParagraphEdits(existingIndex);
-                      }, 100);
-                    });
-                  });
-                } else {
-                  // For regular updates, use shorter timeout
-                  setTimeout(() => {
-                    this.scrollToParagraphEdits(existingIndex);
-                  }, 100);
-                }
+                // Use longer timeout for next editor to ensure DOM is fully updated
+                setTimeout(() => {
+                  this.scrollToParagraphEdits(existingIndex);
+                }, hasNewParagraphEdits ? 200 : 100);
               } else {
                 this.saveCurrentSession();
                 this.cdr.detectChanges();
@@ -606,20 +594,14 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
             this.messages.push(workflowMessage.message);
             
             // If this message has paragraph edits, scroll to paragraph edits section instead of bottom
-            // Use requestAnimationFrame to ensure DOM is fully rendered before scrolling to top
             if (workflowMessage.message.editWorkflow?.paragraphEdits && 
                 workflowMessage.message.editWorkflow.paragraphEdits.length > 0) {
               this.saveCurrentSession();
               this.cdr.detectChanges();
-              // Use requestAnimationFrame with timeout to ensure DOM is ready and scroll to top
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                  setTimeout(() => {
-                    const messageIndex = this.messages.length - 1;
-                    this.scrollToParagraphEdits(messageIndex);
-                  }, 100);
-                });
-              });
+              setTimeout(() => {
+                const messageIndex = this.messages.length - 1;
+                this.scrollToParagraphEdits(messageIndex);
+              }, 100);
               return;
             }
           }
@@ -753,39 +735,37 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     // Scroll to paragraph edits component (stay at top of paragraph edits section)
     // Use requestAnimationFrame to ensure DOM is fully rendered
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          try {
-            const element = this.messagesContainer?.nativeElement;
-            if (element && messageIndex >= 0 && messageIndex < this.messages.length) {
-              // Find the paragraph edits component in the message
-              const messageElements = element.querySelectorAll('.message');
-              if (messageElements[messageIndex]) {
-                const messageElement = messageElements[messageIndex];
-                const paragraphEditsElement = messageElement.querySelector('app-paragraph-edits');
-                if (paragraphEditsElement) {
-                  // Scroll to the paragraph edits component (top of paragraph edits section)
-                  // Use 'start' to ensure it stays at top, not scrolling to bottom
-                  paragraphEditsElement.scrollIntoView({ 
-                    behavior: 'smooth', 
-                    block: 'start', // Keep at top - ensures paragraph edits stay at top
-                    inline: 'nearest'
-                  });
-                } else {
-                  // Fallback to scrolling to the message
-                  messageElement.scrollIntoView({ 
-                    behavior: 'smooth', 
-                    block: 'start', // Keep at top
-                    inline: 'nearest'
-                  });
-                }
+      setTimeout(() => {
+        try {
+          const element = this.messagesContainer?.nativeElement;
+          if (element && messageIndex >= 0 && messageIndex < this.messages.length) {
+            // Find the paragraph edits component in the message
+            const messageElements = element.querySelectorAll('.message');
+            if (messageElements[messageIndex]) {
+              const messageElement = messageElements[messageIndex];
+              const paragraphEditsElement = messageElement.querySelector('app-paragraph-edits');
+              if (paragraphEditsElement) {
+                // Scroll to the paragraph edits component (top of paragraph edits section)
+                // Use 'start' to ensure it stays at top, not scrolling to bottom
+                paragraphEditsElement.scrollIntoView({ 
+                  behavior: 'smooth', 
+                  block: 'start', // Keep at top
+                  inline: 'nearest'
+                });
+              } else {
+                // Fallback to scrolling to the message
+                messageElement.scrollIntoView({ 
+                  behavior: 'smooth', 
+                  block: 'start', // Keep at top
+                  inline: 'nearest'
+                });
               }
             }
-          } catch (err) {
-            console.error('Error scrolling to paragraph edits:', err);
           }
-        }, 50); // Small delay to ensure DOM is ready
-      });
+        } catch (err) {
+          console.error('Error scrolling to paragraph edits:', err);
+        }
+      }, 50); // Small delay to ensure DOM is ready
     });
   }
   
@@ -2368,14 +2348,8 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
       this.editWorkflowService.syncParagraphEditsFromMessage(message.editWorkflow.paragraphEdits);
     }
     
-    // Call the service to generate final article (this will set isGeneratingFinal to true)
+    // Call the service to generate final article
     this.editWorkflowService.generateFinalArticle();
-    
-    // Trigger change detection immediately to update button text to "Generating Final Output..."
-    // Use setTimeout to ensure the service state is set first
-    setTimeout(() => {
-      this.cdr.detectChanges();
-    }, 0);
   }
 
   onNextEditor(message: Message): void {
@@ -2389,15 +2363,9 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
       this.editWorkflowService.syncThreadIdFromMessage(message.editWorkflow.threadId);
     }
     
-    // Call the service to proceed to next editor (this will set isGeneratingNextEditor to true)
+    // Call the service to proceed to next editor
     const paragraphEdits = message.editWorkflow?.paragraphEdits || [];
     this.editWorkflowService.nextEditor(paragraphEdits, message.editWorkflow?.threadId);
-    
-    // Trigger change detection immediately to update button text to "Loading Next Editor..."
-    // Use setTimeout to ensure the service state is set first
-    setTimeout(() => {
-      this.cdr.detectChanges();
-    }, 0);
   }
 
   getParagraphEditsGeneratingState(message: Message): boolean {
