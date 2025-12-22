@@ -775,15 +775,17 @@ export class ChatEditWorkflowService {
           if (data.current_editor) {
             this.currentEditor = data.current_editor;
             this.currentEditorIndex = data.editor_index || 0;
-            // Ensure total_editors is set correctly - prefer backend, then normalized selection (includes brand)
-            const normalizedTotalEditors = normalizeEditorOrder(this.currentState.selectedEditors).length;
-            this.totalEditors = data.total_editors ?? (this.totalEditors || normalizedTotalEditors);
-            // Calculate isLastEditor safely (treat unknown totalEditors as not-last to keep Next visible)
-            if (this.totalEditors && this.totalEditors > 0) {
-              this.isLastEditor = this.currentEditorIndex >= (this.totalEditors - 1);
-            } else {
-              this.isLastEditor = false;
+            // Prioritize backend's total_editors value - only use fallback if backend doesn't provide it
+            // Match guided journey behavior (line 1348)
+            if (data.total_editors !== undefined && data.total_editors !== null) {
+              this.totalEditors = data.total_editors;
+            } else if (this.totalEditors === 0) {
+              // Only use fallback if totalEditors hasn't been set yet
+              this.totalEditors = this.currentState.selectedEditors.length;
+              console.log('[ChatEditWorkflowService] Using fallback totalEditors:', this.totalEditors);
             }
+            // Calculate isLastEditor: match guided journey exactly (line 1349)
+            this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || this.totalEditors || 1) - 1;
           }
           
           const completedEditor = editorProgressList.find(e => e.editorId === data.current_editor || e.editorId === data.editor);
@@ -1485,7 +1487,6 @@ export class ChatEditWorkflowService {
   async nextEditor(paragraphEdits: ParagraphEdit[], threadIdFromMessage?: string | null): Promise<void> {
     // Use threadId from message if service's threadId is null (same as Guided Journey)
     const effectiveThreadId = this.threadId || threadIdFromMessage;
-    const normalizedTotalEditors = normalizeEditorOrder(this.currentState.selectedEditors).length;
     
     if (!effectiveThreadId) {
       console.error('[ChatEditWorkflowService] No thread_id available for next editor');
@@ -1507,10 +1508,6 @@ export class ChatEditWorkflowService {
     // This ensures that approve/reject all actions are reflected in service state
     if (paragraphEdits && paragraphEdits.length > 0) {
       this.syncParagraphEditsFromMessage(paragraphEdits);
-    }
-    // Ensure we have a totalEditors baseline (includes brand-alignment)
-    if (!this.totalEditors || this.totalEditors === 0) {
-      this.totalEditors = normalizedTotalEditors;
     }
 
     if (!this.allParagraphsDecided) {
@@ -1597,12 +1594,11 @@ export class ChatEditWorkflowService {
                 
                 // Handle all_complete
                 if (data.type === 'all_complete') {
-                  // All editors are complete - calculate isLastEditor based on current editor index
-                  // Don't override currentEditorIndex, just ensure isLastEditor is correctly set
-                  // If we're at the last editor (index >= totalEditors - 1), mark as last
-                  const totalEditors = this.totalEditors || normalizedTotalEditors;
-                  this.totalEditors = totalEditors;
-                  this.isLastEditor = totalEditors > 0 ? this.currentEditorIndex >= (totalEditors - 1) : false;
+                  // All editors are complete - mark as last editor to show "Generate Final Output" button
+                  // Match guided journey behavior (line 1321-1327)
+                  this.isGeneratingNextEditorSubject.next(false);
+                  this.isLastEditor = true;
+                  this.currentEditorIndex = this.totalEditors;
                   
                   const updateMessage: Message = {
                     role: 'assistant',
@@ -1637,11 +1633,17 @@ export class ChatEditWorkflowService {
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
                     this.currentEditorIndex = data.editor_index || 0;
-                    // Ensure total_editors is set correctly - prefer backend, then normalized selection (includes brand)
-                    const totalEditors = data.total_editors ?? (this.totalEditors || normalizedTotalEditors);
-                    this.totalEditors = totalEditors;
-                    // Calculate isLastEditor safely
-                    this.isLastEditor = totalEditors > 0 ? this.currentEditorIndex >= (totalEditors - 1) : false;
+                    // Prioritize backend's total_editors value - only use fallback if backend doesn't provide it
+                    // Match guided journey behavior (line 1348)
+                    if (data.total_editors !== undefined && data.total_editors !== null) {
+                      this.totalEditors = data.total_editors;
+                    } else if (this.totalEditors === 0) {
+                      // Only use fallback if totalEditors hasn't been set yet
+                      this.totalEditors = this.currentState.selectedEditors.length;
+                      console.log('[ChatEditWorkflowService] Using fallback totalEditors in nextEditor:', this.totalEditors);
+                    }
+                    // Calculate isLastEditor: match guided journey exactly (line 1349)
+                    this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || this.totalEditors || 1) - 1;
                   }
 
                   // Process paragraph edits
