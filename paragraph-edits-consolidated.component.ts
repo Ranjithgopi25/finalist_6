@@ -66,7 +66,6 @@ type ParagraphFeedback = ParagraphEdit & {
             <div class="paragraph-edit-item"
               [ngClass]="{ 'approved': paragraph.approved === true, 'declined': paragraph.approved === false }">
               <div class="paragraph-header">
-                <div class="paragraph-number">Paragraph {{ paragraph.index + 1 }}</div>
                 <!-- Paragraph-level approve/reject removed; use the bulk actions or editorial feedback actions -->
                 @if (showFinalOutput) {
                   <div class="approval-status">
@@ -856,10 +855,27 @@ type ParagraphFeedback = ParagraphEdit & {
     }
 
     :host ::ng-deep .highlight-hover {
-      background: #fbbf24 !important;
-      color: #78350f !important;
-      box-shadow: 0 0 0 2px #f59e0b;
+      // Enhance existing highlight colors with hover effect instead of replacing with yellow
+      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.2);
+      transform: scale(1.02);
       transition: all 0.2s ease;
+      // Darken existing background slightly
+      filter: brightness(0.95);
+    }
+    
+    // Specific hover enhancements for different highlight types
+    :host ::ng-deep .highlight-yellow.highlight-hover {
+      background: #fde047 !important; // Slightly brighter yellow
+      box-shadow: 0 0 0 2px #facc15;
+    }
+    
+    :host ::ng-deep .highlight-green.highlight-hover {
+      background: #4ade80 !important; // Slightly brighter green
+      box-shadow: 0 0 0 2px #22c55e;
+    }
+    
+    :host ::ng-deep .strikeout.highlight-hover {
+      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.2);
     }
 
     :host ::ng-deep .strikeout {
@@ -1185,20 +1201,26 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     }
     
     return this.paragraphEdits.every(para => {
-      // Check if paragraph itself is decided
-      if (para.approved === null || para.approved === undefined) {
-        return false;
-      }
-      
-      // Check if all editorial feedback items are decided
+      // Only check if all editorial feedback items are decided (not paragraph approval)
+      // This allows Next Editor to enable when all feedback is approved/rejected
       if (!para.editorial_feedback) {
         return true; // No feedback means nothing to decide
       }
       
       const feedbackTypes = Object.keys(para.editorial_feedback);
+      // If there are no feedback types, consider it decided
+      if (feedbackTypes.length === 0) {
+        return true;
+      }
+      
       for (const editorType of feedbackTypes) {
         const feedbacks = (para.editorial_feedback as any)[editorType] || [];
+        // If there are no feedbacks for this editor type, skip it
+        if (feedbacks.length === 0) {
+          continue;
+        }
         for (const fb of feedbacks) {
+          // Feedback is decided if approved is true or false (not null/undefined)
           if (fb.approved === null || fb.approved === undefined) {
             return false;
           }
@@ -1478,11 +1500,8 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     if (this.showFinalOutput) {
       return;
     }
-    // Approve both feedback items AND paragraphs (matching guided journey behavior)
+    // Only approve feedback items, NOT paragraphs (no paragraph text box highlighting)
     this.paragraphEdits.forEach((para: any) => {
-      // Set paragraph approval status
-      para.approved = true;
-      
       // Approve all feedback items
       Object.keys(para.editorial_feedback || {}).forEach(editorType => {
         const feedbacks = (para.editorial_feedback as any)[editorType] || [];
@@ -1504,11 +1523,8 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     if (this.showFinalOutput) {
       return;
     }
-    // Reject both feedback items AND paragraphs (matching guided journey behavior)
+    // Only reject feedback items, NOT paragraphs (no paragraph text box highlighting)
     this.paragraphEdits.forEach((para: any) => {
-      // Set paragraph rejection status
-      para.approved = false;
-      
       // Reject all feedback items
       Object.keys(para.editorial_feedback || {}).forEach(editorType => {
         const feedbacks = (para.editorial_feedback as any)[editorType] || [];
