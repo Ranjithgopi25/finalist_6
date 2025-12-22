@@ -2,7 +2,8 @@ import { Component, OnInit, OnDestroy, HostListener, ViewChild, ElementRef, Afte
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
-import { ChatService, ThemeService, ThemeMode, TlChatBridgeService, ChatEditWorkflowService } from '../../core/services';
+import { ChatService, ThemeService, ThemeMode, TlChatBridgeService } from '../../core/services';
+import { ChatEditWorkflowService } from '../../core/services/chat-edit-workflow.service';
 import { ChatDraftWorkflowService } from '../../core/services/chat-draft-workflow.service';
 import { Message, ChatSession, ThoughtLeadershipRequest, ThoughtLeadershipMetadata, MarketIntelligenceMetadata, EditorOption } from '../../core/models';
 import { SourceCitationPipe } from '../../core/pipes';
