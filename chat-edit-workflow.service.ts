@@ -1586,23 +1586,21 @@ export class ChatEditWorkflowService {
               try {
                 const data = JSON.parse(dataStr);
                 
-                // Handle all_complete
+                // Handle all_complete (final confirmation from backend that all editors have finished)
                 if (data.type === 'all_complete') {
-                  // All editors are complete - set isLastEditor to true unconditionally
-                  // Update editor info if provided in the event data
+                  // Update editor info if provided, but DO NOT override isLastEditor here.
+                  // isLastEditor is derived from editor_complete events using editor_index/total_editors
+                  // to match Guided Journey behavior.
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
                   }
                   if (data.total_editors !== undefined && data.total_editors !== null) {
                     this.totalEditors = data.total_editors;
                   }
-                  // Mark as last editor to show "Generate Final Output" button (matching Guided Journey)
-                  this.isLastEditor = true;
-                  this.currentEditorIndex = this.totalEditors;
-                  
+
                   // Reset generating state before emitting update message
                   this.isGeneratingNextEditorSubject.next(false);
-                  
+
                   const updateMessage: Message = {
                     role: 'assistant',
                     content: '',
@@ -1616,6 +1614,7 @@ export class ChatEditWorkflowService {
                       threadId: this.threadId,
                       currentEditor: this.currentEditor,
                       isSequentialMode: this.isSequentialMode,
+                      // Keep existing isLastEditor value from previous editor_complete event
                       isLastEditor: this.isLastEditor,
                       currentEditorIndex: this.currentEditorIndex,
                       totalEditors: this.totalEditors
