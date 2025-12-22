@@ -1582,8 +1582,75 @@ export class ChatEditWorkflowService {
                 if (data.type === 'all_complete') {
                   this.isGeneratingNextEditorSubject.next(false);
                   this.isLastEditor = true;
-                  // Set to totalEditors (0-based: last editor is at index totalEditors - 1, but we use totalEditors for display consistency)
                   this.currentEditorIndex = this.totalEditors;
+                  
+                  // Use the most recent paragraph edits from state (should be updated by last editor_complete)
+                  // If all_complete includes paragraph_edits, process them; otherwise use current state
+                  let paragraphEditsToUse = [...this.currentState.paragraphEdits];
+                  
+                  if (data.paragraph_edits && Array.isArray(data.paragraph_edits) && data.paragraph_edits.length > 0) {
+                    // Process paragraph edits from all_complete if provided
+                    const allEditorNames = this.currentState.selectedEditors.map(editorId => {
+                      return getEditorDisplayName(editorId);
+                    });
+                    
+                    const originalContent = data.original_content || this.currentState.originalContent || '';
+                    const originalParagraphs = originalContent ? splitIntoParagraphs(originalContent) : [];
+                    
+                    paragraphEditsToUse = data.paragraph_edits.map((edit: any, arrayIndex: number) => {
+                      const existingTags = edit.tags || [];
+                      const existingEditorNames = new Set<string>(
+                        existingTags.map((tag: string) => {
+                          const match = tag.match(/^(.+?)\s*\(/);
+                          return match ? match[1].trim() : tag;
+                        })
+                      );
+                      
+                      const allTags = [...existingTags];
+                      allEditorNames.forEach(editorName => {
+                        const existingNamesArray = Array.from(existingEditorNames) as string[];
+                        if (!existingNamesArray.some((existing: string) => 
+                          existing.toLowerCase().includes(editorName.toLowerCase()) || 
+                          editorName.toLowerCase().includes(existing.toLowerCase())
+                        )) {
+                          allTags.push(`${editorName} (Reviewed)`);
+                        }
+                      });
+                      
+                      const paragraphIndex = (edit.index !== undefined && edit.index !== null) ? edit.index : arrayIndex;
+                      const originalText = (edit.original && edit.original.trim()) || (originalParagraphs.length > paragraphIndex && paragraphIndex >= 0 ? (originalParagraphs[paragraphIndex] && originalParagraphs[paragraphIndex].trim()) || '' : '');
+                      const editedText = (edit.edited && edit.edited.trim()) || '';
+                      const isIdentical = validateStringEquality(originalText, editedText);
+                      const autoApproved = edit.autoApproved !== undefined ? edit.autoApproved : isIdentical;
+                      const approved = autoApproved ? true : (edit.approved !== undefined ? edit.approved : null);
+
+                      const editorial_feedback = edit.editorial_feedback ? {
+                        development: edit.editorial_feedback.development || [],
+                        content: edit.editorial_feedback.content || [],
+                        copy: edit.editorial_feedback.copy || [],
+                        line: edit.editorial_feedback.line || [],
+                        brand: edit.editorial_feedback.brand || []
+                      } : undefined;
+
+                      return {
+                        index: paragraphIndex,
+                        original: originalText,
+                        edited: editedText,
+                        tags: allTags,
+                        autoApproved: autoApproved,
+                        approved: approved,
+                        editorial_feedback: editorial_feedback,
+                        displayOriginal: undefined,
+                        displayEdited: undefined
+                      } as ParagraphEdit;
+                    });
+                    
+                    // Update state with processed paragraph edits
+                    this.updateState({
+                      ...this.currentState,
+                      paragraphEdits: paragraphEditsToUse
+                    });
+                  }
                   
                   const updateMessage: Message = {
                     role: 'assistant',
@@ -1592,7 +1659,7 @@ export class ChatEditWorkflowService {
                     isHtml: false,
                     editWorkflow: {
                       step: 'awaiting_approval',
-                      paragraphEdits: [...this.currentState.paragraphEdits],
+                      paragraphEdits: paragraphEditsToUse,
                       showCancelButton: false,
                       showSimpleCancelButton: true,
                       threadId: this.threadId,
@@ -1600,7 +1667,8 @@ export class ChatEditWorkflowService {
                       isSequentialMode: this.isSequentialMode,
                       isLastEditor: true,
                       currentEditorIndex: this.currentEditorIndex,
-                      totalEditors: this.totalEditors
+                      totalEditors: this.totalEditors,
+                      isGeneratingNextEditor: false
                     }
                   };
                   this.messageSubject.next({ type: 'update', message: updateMessage });
