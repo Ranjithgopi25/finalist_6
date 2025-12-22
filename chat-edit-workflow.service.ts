@@ -1457,30 +1457,12 @@ export class ChatEditWorkflowService {
       return;
     }
 
-    // Set generating state for next editor
+    // Set generating state for next editor (keep previous editor visible while loading)
     this.isGeneratingNextEditorSubject.next(true);
 
-    // Emit update message with loading state and clear paragraph edits
-    const loadingMessage: Message = {
-      role: 'assistant',
-      content: '',
-      timestamp: new Date(),
-      isHtml: false,
-      editWorkflow: {
-        step: 'awaiting_approval',
-        paragraphEdits: [], // Clear paragraph edits to show loading
-        showCancelButton: false,
-        showSimpleCancelButton: true,
-        threadId: this.threadId,
-        currentEditor: this.currentEditor,
-        isSequentialMode: this.isSequentialMode,
-        isLastEditor: this.isLastEditor,
-        currentEditorIndex: this.currentEditorIndex,
-        totalEditors: this.totalEditors,
-        isGeneratingNextEditor: true // Indicate loading for next editor
-      }
-    };
-    this.messageSubject.next({ type: 'update', message: loadingMessage });
+    // Don't clear paragraph edits - keep previous editor visible until new one is generated
+    // The loading state will be shown in the button text ("Loading Next Editor...")
+    // No need to emit update message here - existing paragraph edits stay visible
 
     try {
       // Collect decisions from paragraphEdits
