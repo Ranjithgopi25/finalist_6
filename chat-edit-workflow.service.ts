@@ -720,6 +720,8 @@ export class ChatEditWorkflowService {
       current: index + 1,
       total: normalizedEditorIds.length
     }));
+    // Initialize totalEditors from normalized editor list (matches guided journey line 368)
+    this.totalEditors = normalizedEditorIds.length;
 
     // Use default temperature (0.15) - optimal for editing: allows minor improvements while staying deterministic
     this.chatService.streamEditContent(messages, normalizedEditorIds).subscribe({
@@ -771,11 +773,19 @@ export class ChatEditWorkflowService {
           
           if (data.current_editor) {
             this.currentEditor = data.current_editor;
-            this.currentEditorIndex = data.editor_index ?? 0;
-            // Use total_editors from data if available, otherwise keep existing totalEditors, fallback to selectedEditors length
-            this.totalEditors = data.total_editors ?? this.totalEditors ?? normalizedEditorIds.length;
-            // Calculate isLastEditor with proper validation
-            this.isLastEditor = this.calculateIsLastEditor(this.currentEditorIndex, this.totalEditors);
+            this.currentEditorIndex = data.editor_index || 0;
+            this.totalEditors = data.total_editors || this.totalEditors;
+            // Use this.totalEditors as fallback (set on line above) instead of hardcoded 1
+            // This ensures we use the preserved value if backend doesn't send total_editors
+            const effectiveTotalEditors = data.total_editors || this.totalEditors || 1;
+            this.isLastEditor = (data.editor_index || 0) >= (effectiveTotalEditors - 1);
+            console.log('[ChatEditWorkflowService] Editor complete (initial) - isLastEditor calculation:', {
+              editor_index: data.editor_index,
+              data_total_editors: data.total_editors,
+              this_totalEditors: this.totalEditors,
+              effectiveTotalEditors: effectiveTotalEditors,
+              isLastEditor: this.isLastEditor
+            });
           }
           
           const completedEditor = editorProgressList.find(e => e.editorId === data.current_editor || e.editorId === data.editor);
@@ -1469,31 +1479,6 @@ export class ChatEditWorkflowService {
     // Combine all original paragraphs
     return sortedEdits.map(p => p.original).filter(p => p && p.trim()).join('\n\n');
   }
-
-  /** Calculate isLastEditor flag with proper validation (matches Guided Journey logic) */
-  private calculateIsLastEditor(editorIndex: number | null | undefined, totalEditors: number | null | undefined): boolean {
-    // Validate inputs: ensure both are valid numbers
-    const validEditorIndex = (typeof editorIndex === 'number' && editorIndex >= 0) ? editorIndex : null;
-    const validTotalEditors = (typeof totalEditors === 'number' && totalEditors > 0) ? totalEditors : null;
-    
-    // If either is invalid, default to false (not last editor)
-    if (validEditorIndex === null || validTotalEditors === null) {
-      console.warn('[ChatEditWorkflowService] Invalid editor index or total editors:', { editorIndex, totalEditors });
-      return false;
-    }
-    
-    // 0-based indexing: last editor is at index (totalEditors - 1)
-    // For 4 editors (indices 0,1,2,3): isLastEditor is true only at index 3
-    const isLast = validEditorIndex >= (validTotalEditors - 1);
-    
-    console.log('[ChatEditWorkflowService] Calculating isLastEditor:', {
-      editorIndex: validEditorIndex,
-      totalEditors: validTotalEditors,
-      isLastEditor: isLast
-    });
-    
-    return isLast;
-  }
   
   /** Move to next editor in sequential workflow */
   async nextEditor(paragraphEdits: ParagraphEdit[], threadIdFromMessage?: string | null): Promise<void> {
@@ -1513,6 +1498,12 @@ export class ChatEditWorkflowService {
     // Update service's threadId if it was null and we got it from message
     if (!this.threadId && threadIdFromMessage) {
       this.threadId = threadIdFromMessage;
+    }
+
+    // Ensure totalEditors is set (preserve from initial processContent or use selectedEditors length)
+    if (!this.totalEditors || this.totalEditors === 0) {
+      this.totalEditors = this.currentState.selectedEditors.length;
+      console.log('[ChatEditWorkflowService] totalEditors was missing, initialized from selectedEditors:', this.totalEditors);
     }
 
     if (paragraphEdits && paragraphEdits.length > 0) {
@@ -1591,26 +1582,11 @@ export class ChatEditWorkflowService {
                 const data = JSON.parse(dataStr);
                 
                 if (data.type === 'all_complete') {
-                  if (data.current_editor) {
-                    this.currentEditor = data.current_editor;
-                  }
-                  if (data.total_editors !== undefined && data.total_editors !== null) {
-                    this.totalEditors = data.total_editors;
-                  }
-
-                  // Validate that we've reached the last editor before marking as complete
-                  const expectedLastIndex = this.totalEditors > 0 ? (this.totalEditors - 1) : 0;
-                  if (this.currentEditorIndex < expectedLastIndex) {
-                    console.warn('[ChatEditWorkflowService] Received all_complete prematurely. Current:', this.currentEditorIndex, 'Expected:', expectedLastIndex, 'Total:', this.totalEditors);
-                    continue;
-                  }
-                  
-                  // All editors complete - mark as last editor
-                  this.isLastEditor = true;
-                  // Set currentEditorIndex to the last editor's index (0-based: totalEditors - 1)
-                  this.currentEditorIndex = this.totalEditors > 0 ? (this.totalEditors - 1) : 0;
                   this.isGeneratingNextEditorSubject.next(false);
-
+                  // Mark as last editor to show "Generate Final Output" button (matches guided journey line 1324-1325)
+                  this.isLastEditor = true;
+                  this.currentEditorIndex = this.totalEditors;
+                  
                   const updateMessage: Message = {
                     role: 'assistant',
                     content: '',
@@ -1640,11 +1616,19 @@ export class ChatEditWorkflowService {
 
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
-                    this.currentEditorIndex = data.editor_index ?? 0;
-                    // Use total_editors from data if available, otherwise keep existing totalEditors
-                    this.totalEditors = data.total_editors ?? this.totalEditors ?? this.currentState.selectedEditors.length;
-                    // Calculate isLastEditor with proper validation
-                    this.isLastEditor = this.calculateIsLastEditor(this.currentEditorIndex, this.totalEditors);
+                    this.currentEditorIndex = data.editor_index || 0;
+                    this.totalEditors = data.total_editors || this.totalEditors;
+                    // Use this.totalEditors as fallback (set on line above) instead of hardcoded 1
+                    // This ensures we use the preserved value if backend doesn't send total_editors
+                    const effectiveTotalEditors = data.total_editors || this.totalEditors || 1;
+                    this.isLastEditor = (data.editor_index || 0) >= (effectiveTotalEditors - 1);
+                    console.log('[ChatEditWorkflowService] Editor complete - isLastEditor calculation:', {
+                      editor_index: data.editor_index,
+                      data_total_editors: data.total_editors,
+                      this_totalEditors: this.totalEditors,
+                      effectiveTotalEditors: effectiveTotalEditors,
+                      isLastEditor: this.isLastEditor
+                    });
                   }
 
                   let newParagraphEdits: ParagraphEdit[] = [];
