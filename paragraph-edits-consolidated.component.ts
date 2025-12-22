@@ -1369,6 +1369,10 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     
     // Force change detection to update button states (enable/disable Next Editor and Generate Final Output)
     this.cdr.detectChanges();
+    // Additional change detection after a short delay to ensure buttons update
+    setTimeout(() => {
+      this.cdr.detectChanges();
+    }, 0);
   }
 
   /** Remove any existing HTML tags from text so we highlight against raw text */
@@ -1395,6 +1399,10 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     
     // Force change detection to update button states (enable/disable Next Editor and Generate Final Output)
     this.cdr.detectChanges();
+    // Additional change detection after a short delay to ensure buttons update
+    setTimeout(() => {
+      this.cdr.detectChanges();
+    }, 0);
   }
 
 
@@ -1512,21 +1520,37 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
       return;
     }
     // Only approve feedback items, NOT paragraphs (no paragraph text box highlighting)
-    this.paragraphEdits.forEach((para: any) => {
-      // Approve all feedback items
-      Object.keys(para.editorial_feedback || {}).forEach(editorType => {
-        const feedbacks = (para.editorial_feedback as any)[editorType] || [];
-        feedbacks.forEach((fb: any) => {
-          // Set all to approved (don't toggle)
-          fb.approved = true;
+    // Create new array references to ensure Angular change detection works properly
+    this.paragraphEdits = this.paragraphEdits.map((para: any) => {
+      const updatedPara = { ...para };
+      
+      // Create new editorial_feedback object with updated feedback items
+      if (updatedPara.editorial_feedback) {
+        const updatedFeedback: any = {};
+        Object.keys(updatedPara.editorial_feedback).forEach(editorType => {
+          const feedbacks = (updatedPara.editorial_feedback as any)[editorType] || [];
+          // Create new array with updated feedback items
+          updatedFeedback[editorType] = feedbacks.map((fb: any) => ({
+            ...fb,
+            approved: true // Set all to approved (don't toggle)
+          }));
         });
-      });
+        updatedPara.editorial_feedback = updatedFeedback;
+      }
+      
       // Clear display properties so highlightAllFeedbacks() handles all highlighting
-      para.displayOriginal = undefined;
-      para.displayEdited = undefined;
+      updatedPara.displayOriginal = undefined;
+      updatedPara.displayEdited = undefined;
+      
+      return updatedPara;
     });
-    // Force change detection to update the view
+    
+    // Force change detection to update the view and button states
     this.cdr.detectChanges();
+    // Additional change detection after a short delay to ensure buttons update
+    setTimeout(() => {
+      this.cdr.detectChanges();
+    }, 0);
   }
 
   rejectAllFeedback(): void {
@@ -1535,21 +1559,37 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
       return;
     }
     // Only reject feedback items, NOT paragraphs (no paragraph text box highlighting)
-    this.paragraphEdits.forEach((para: any) => {
-      // Reject all feedback items
-      Object.keys(para.editorial_feedback || {}).forEach(editorType => {
-        const feedbacks = (para.editorial_feedback as any)[editorType] || [];
-        feedbacks.forEach((fb: any) => {
-          // Set all to rejected (don't toggle)
-          fb.approved = false;
+    // Create new array references to ensure Angular change detection works properly
+    this.paragraphEdits = this.paragraphEdits.map((para: any) => {
+      const updatedPara = { ...para };
+      
+      // Create new editorial_feedback object with updated feedback items
+      if (updatedPara.editorial_feedback) {
+        const updatedFeedback: any = {};
+        Object.keys(updatedPara.editorial_feedback).forEach(editorType => {
+          const feedbacks = (updatedPara.editorial_feedback as any)[editorType] || [];
+          // Create new array with updated feedback items
+          updatedFeedback[editorType] = feedbacks.map((fb: any) => ({
+            ...fb,
+            approved: false // Set all to rejected (don't toggle)
+          }));
         });
-      });
+        updatedPara.editorial_feedback = updatedFeedback;
+      }
+      
       // Clear display properties so highlightAllFeedbacks() handles all highlighting
-      para.displayOriginal = undefined;
-      para.displayEdited = undefined;
+      updatedPara.displayOriginal = undefined;
+      updatedPara.displayEdited = undefined;
+      
+      return updatedPara;
     });
-    // Force change detection to update the view
+    
+    // Force change detection to update the view and button states
     this.cdr.detectChanges();
+    // Additional change detection after a short delay to ensure buttons update
+    setTimeout(() => {
+      this.cdr.detectChanges();
+    }, 0);
   }
 
   /** Approve All: approve all feedback items only (NOT paragraphs) */
@@ -1586,8 +1626,12 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
       para.displayEdited = undefined;
     });
     
-    // Force change detection to update highlights
+    // Force change detection to update highlights and button states
     this.cdr.detectChanges();
+    // Additional change detection after a short delay to ensure buttons update
+    setTimeout(() => {
+      this.cdr.detectChanges();
+    }, 0);
   }
 
   // derived minimal shape used for bulk operations
