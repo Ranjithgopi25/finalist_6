@@ -775,17 +775,11 @@ export class ChatEditWorkflowService {
           if (data.current_editor) {
             this.currentEditor = data.current_editor;
             this.currentEditorIndex = data.editor_index || 0;
-            // Prioritize backend's total_editors value - only use fallback if backend doesn't provide it
-            // Match guided journey behavior (line 1348)
-            if (data.total_editors !== undefined && data.total_editors !== null) {
-              this.totalEditors = data.total_editors;
-            } else if (this.totalEditors === 0) {
-              // Only use fallback if totalEditors hasn't been set yet
-              this.totalEditors = this.currentState.selectedEditors.length;
-              console.log('[ChatEditWorkflowService] Using fallback totalEditors:', this.totalEditors);
-            }
-            // Calculate isLastEditor: match guided journey exactly (line 1349)
-            this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || this.totalEditors || 1) - 1;
+            // Ensure total_editors is set correctly - use backend value or keep existing
+            this.totalEditors = data.total_editors || this.totalEditors;
+            // Calculate isLastEditor: editor_index is 0-based, so last editor is at index (total_editors - 1)
+            // Use data values directly with safe fallbacks (matching Guided Journey)
+            this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || 1) - 1;
           }
           
           const completedEditor = editorProgressList.find(e => e.editorId === data.current_editor || e.editorId === data.editor);
@@ -1594,11 +1588,20 @@ export class ChatEditWorkflowService {
                 
                 // Handle all_complete
                 if (data.type === 'all_complete') {
-                  // All editors are complete - mark as last editor to show "Generate Final Output" button
-                  // Match guided journey behavior (line 1321-1327)
-                  this.isGeneratingNextEditorSubject.next(false);
+                  // All editors are complete - set isLastEditor to true unconditionally
+                  // Update editor info if provided in the event data
+                  if (data.current_editor) {
+                    this.currentEditor = data.current_editor;
+                  }
+                  if (data.total_editors !== undefined && data.total_editors !== null) {
+                    this.totalEditors = data.total_editors;
+                  }
+                  // Mark as last editor to show "Generate Final Output" button (matching Guided Journey)
                   this.isLastEditor = true;
                   this.currentEditorIndex = this.totalEditors;
+                  
+                  // Reset generating state before emitting update message
+                  this.isGeneratingNextEditorSubject.next(false);
                   
                   const updateMessage: Message = {
                     role: 'assistant',
@@ -1633,17 +1636,11 @@ export class ChatEditWorkflowService {
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
                     this.currentEditorIndex = data.editor_index || 0;
-                    // Prioritize backend's total_editors value - only use fallback if backend doesn't provide it
-                    // Match guided journey behavior (line 1348)
-                    if (data.total_editors !== undefined && data.total_editors !== null) {
-                      this.totalEditors = data.total_editors;
-                    } else if (this.totalEditors === 0) {
-                      // Only use fallback if totalEditors hasn't been set yet
-                      this.totalEditors = this.currentState.selectedEditors.length;
-                      console.log('[ChatEditWorkflowService] Using fallback totalEditors in nextEditor:', this.totalEditors);
-                    }
-                    // Calculate isLastEditor: match guided journey exactly (line 1349)
-                    this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || this.totalEditors || 1) - 1;
+                    // Ensure total_editors is set correctly - use backend value or keep existing
+                    this.totalEditors = data.total_editors || this.totalEditors;
+                    // Calculate isLastEditor: editor_index is 0-based, so last editor is at index (total_editors - 1)
+                    // Use data values directly with safe fallbacks (matching Guided Journey)
+                    this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || 1) - 1;
                   }
 
                   // Process paragraph edits
