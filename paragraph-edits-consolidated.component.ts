@@ -60,17 +60,8 @@ type ParagraphFeedback = ParagraphEdit & {
       }
     
       <div class="paragraph-edits-container">
-        <!-- Loading state when generating next editor -->
-        @if (isGenerating && paragraphEdits.length === 0) {
-          <div class="paragraph-edit-item loading-state">
-            <div class="loading-content">
-              <span class="spinner"></span>
-              <p class="loading-text">Loading Next Editor...</p>
-              <p class="loading-subtext">Please wait while the next editor processes your content.</p>
-            </div>
-          </div>
-        }
-        @if (!isGenerating && paragraphsForReview.length > 0) {
+        <!-- Show paragraph edits (previous editor stays visible while loading next editor) -->
+        @if (paragraphsForReview.length > 0) {
           @for (paragraph of paragraphsForReview; track paragraph) {
             <div class="paragraph-edit-item"
               [ngClass]="{ 'approved': paragraph.approved === true, 'declined': paragraph.approved === false }">
@@ -1487,9 +1478,8 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     if (this.showFinalOutput) {
       return;
     }
-    // Mutate the real paragraph objects so the template picks up changes
+    // Only approve feedback items, NOT paragraphs (matching guided journey behavior)
     this.paragraphEdits.forEach((para: any) => {
-      para.approved = true;
       Object.keys(para.editorial_feedback || {}).forEach(editorType => {
         const feedbacks = (para.editorial_feedback as any)[editorType] || [];
         feedbacks.forEach((fb: any) => {
@@ -1510,9 +1500,8 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     if (this.showFinalOutput) {
       return;
     }
-    // Mutate the real paragraph objects so the template picks up changes
+    // Only reject feedback items, NOT paragraphs (matching guided journey behavior)
     this.paragraphEdits.forEach((para: any) => {
-      para.approved = false;
       Object.keys(para.editorial_feedback || {}).forEach(editorType => {
         const feedbacks = (para.editorial_feedback as any)[editorType] || [];
         feedbacks.forEach((fb: any) => {
@@ -1528,21 +1517,11 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     this.cdr.detectChanges();
   }
 
-  /** Unified Approve All: approve all feedback items and approve all paragraphs */
+  /** Approve All: approve all feedback items only (NOT paragraphs) */
   approveAll(): void {
     if (this.showFinalOutput) return;
     
-    // Approve all paragraphs first
-    this.paragraphEdits.forEach((para: any) => {
-      if (para.index !== undefined && para.index !== null) {
-        // Emit paragraph approval event
-        this.paragraphApproved.emit(para.index);
-        // Also set locally for immediate UI update
-        para.approved = true;
-      }
-    });
-    
-    // Then approve all feedback
+    // Only approve feedback items, NOT paragraphs (matching guided journey behavior)
     this.approveAllFeedback();
     
     // Clear hover state and display properties to force re-highlighting
@@ -1557,21 +1536,11 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     this.cdr.detectChanges();
   }
 
-  /** Unified Decline All: reject all feedback items and decline all paragraphs */
+  /** Reject All: reject all feedback items only (NOT paragraphs) */
   declineAll(): void {
     if (this.showFinalOutput) return;
     
-    // Decline all paragraphs first
-    this.paragraphEdits.forEach((para: any) => {
-      if (para.index !== undefined && para.index !== null) {
-        // Emit paragraph decline event
-        this.paragraphDeclined.emit(para.index);
-        // Also set locally for immediate UI update
-        para.approved = false;
-      }
-    });
-    
-    // Then reject all feedback
+    // Only reject feedback items, NOT paragraphs (matching guided journey behavior)
     this.rejectAllFeedback();
     
     // Clear hover state and display properties to force re-highlighting
@@ -1650,8 +1619,11 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
       feedbackIndex: fbIndex
     };
     
-    // Generate highlights with this specific feedback item highlighted
-    const highlighted = this.highlightSingleFeedback(para, editorType, fb);
+    // First generate normal highlights for all feedback items (preserves other feedback highlights)
+    const normalHighlights = this.highlightAllFeedbacks(para);
+    
+    // Then add hover highlight on top for the specific feedback item
+    const highlighted = this.addHoverHighlight(normalHighlights, para, editorType, fb);
     para.displayOriginal = highlighted.original;
     para.displayEdited = highlighted.edited;
     
@@ -1673,27 +1645,40 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     this.cdr.detectChanges();
   }
 
-  /** Highlight only a single feedback item (for hover effect) */
-  private highlightSingleFeedback(para: ParagraphEdit | ParagraphFeedback, editorType: string, fb: any): { original: string, edited: string } {
-    const originalText = this.stripHtmlSpans((para as any)?.original ?? '');
-    const editedText = this.stripHtmlSpans((para as any)?.edited ?? '');
+  /** Add hover highlight on top of existing highlights for a specific feedback item */
+  private addHoverHighlight(existingHighlights: { original: string, edited: string }, para: ParagraphEdit | ParagraphFeedback, editorType: string, fb: any): { original: string, edited: string } {
+    let highlightedOriginal = existingHighlights.original;
+    let highlightedEdited = existingHighlights.edited;
 
-    let highlightedOriginal = originalText;
-    let highlightedEdited = editedText;
-
-    // Highlight only the hovered feedback item with special hover class
+    // Add hover highlight for issue text in original
     const issueText = fb.issue?.trim();
-    if (issueText && highlightedOriginal.includes(issueText)) {
+    if (issueText) {
       const escaped = this.escapeRegex(issueText);
-      const regex = new RegExp(escaped, 'g');
-      highlightedOriginal = highlightedOriginal.replace(regex, `<span class="highlight-yellow highlight-hover">$&</span>`);
+      // Find spans that contain this exact text and add hover class
+      // Match spans that contain the issue text (handles nested spans)
+      const spanRegex = new RegExp(`(<span[^>]*class="[^"]*"[^>]*>([^<]*${escaped}[^<]*)</span>)`, 'g');
+      highlightedOriginal = highlightedOriginal.replace(spanRegex, (match) => {
+        // Add highlight-hover class to existing span if not already present
+        if (!match.includes('highlight-hover')) {
+          return match.replace(/class="([^"]*)"/, `class="$1 highlight-hover"`);
+        }
+        return match;
+      });
     }
 
+    // Add hover highlight for fix text in edited
     const fixText = fb.fix?.trim();
-    if (fixText && highlightedEdited.includes(fixText)) {
+    if (fixText) {
       const escaped = this.escapeRegex(fixText);
-      const regex = new RegExp(escaped, 'g');
-      highlightedEdited = highlightedEdited.replace(regex, `<span class="highlight-yellow highlight-hover">$&</span>`);
+      // Find spans that contain this exact text and add hover class
+      const spanRegex = new RegExp(`(<span[^>]*class="[^"]*"[^>]*>([^<]*${escaped}[^<]*)</span>)`, 'g');
+      highlightedEdited = highlightedEdited.replace(spanRegex, (match) => {
+        // Add highlight-hover class to existing span if not already present
+        if (!match.includes('highlight-hover')) {
+          return match.replace(/class="([^"]*)"/, `class="$1 highlight-hover"`);
+        }
+        return match;
+      });
     }
 
     return { original: highlightedOriginal, edited: highlightedEdited };
