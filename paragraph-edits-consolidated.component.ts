@@ -1478,8 +1478,12 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     if (this.showFinalOutput) {
       return;
     }
-    // Only approve feedback items, NOT paragraphs (matching guided journey behavior)
+    // Approve both feedback items AND paragraphs (matching guided journey behavior)
     this.paragraphEdits.forEach((para: any) => {
+      // Set paragraph approval status
+      para.approved = true;
+      
+      // Approve all feedback items
       Object.keys(para.editorial_feedback || {}).forEach(editorType => {
         const feedbacks = (para.editorial_feedback as any)[editorType] || [];
         feedbacks.forEach((fb: any) => {
@@ -1500,8 +1504,12 @@ export class ParagraphEditsConsolidatedComponent implements OnChanges {
     if (this.showFinalOutput) {
       return;
     }
-    // Only reject feedback items, NOT paragraphs (matching guided journey behavior)
+    // Reject both feedback items AND paragraphs (matching guided journey behavior)
     this.paragraphEdits.forEach((para: any) => {
+      // Set paragraph rejection status
+      para.approved = false;
+      
+      // Reject all feedback items
       Object.keys(para.editorial_feedback || {}).forEach(editorType => {
         const feedbacks = (para.editorial_feedback as any)[editorType] || [];
         feedbacks.forEach((fb: any) => {
