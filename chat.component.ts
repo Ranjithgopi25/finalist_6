@@ -606,6 +606,18 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
               }, 100);
               return;
             }
+            
+            // If this is a final output message (has thoughtLeadership with topic 'Final Revised Article'),
+            // scroll to the top of the message instead of bottom
+            if (workflowMessage.message.thoughtLeadership?.topic === 'Final Revised Article') {
+              this.saveCurrentSession();
+              this.cdr.detectChanges();
+              setTimeout(() => {
+                const messageIndex = this.messages.length - 1;
+                this.scrollToMessageTop(messageIndex);
+              }, 100);
+              return;
+            }
           }
           
           this.saveCurrentSession();
@@ -748,25 +760,24 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
               const paragraphEditsElement = messageElement.querySelector('app-paragraph-edits');
               if (paragraphEditsElement) {
                 // Scroll to the paragraph edits component (top of paragraph edits section)
-                // Use 'start' to ensure it stays at top, not scrolling to bottom
-                // Also ensure the container scrolls to show the top of the element
+                // Calculate position relative to scroll container
                 const containerRect = element.getBoundingClientRect();
                 const elementRect = paragraphEditsElement.getBoundingClientRect();
                 const relativeTop = elementRect.top - containerRect.top + element.scrollTop;
                 
-                // Scroll container to show the top of paragraph edits section
+                // Scroll container to show the top of paragraph edits section with small offset
                 element.scrollTo({
-                  top: relativeTop - 20, // Add small offset from top
+                  top: Math.max(0, relativeTop - 20), // Add small offset from top, ensure non-negative
                   behavior: 'smooth'
                 });
               } else {
-                // Fallback to scrolling to the message
+                // Fallback to scrolling to the message top
                 const containerRect = element.getBoundingClientRect();
                 const elementRect = messageElement.getBoundingClientRect();
                 const relativeTop = elementRect.top - containerRect.top + element.scrollTop;
                 
                 element.scrollTo({
-                  top: relativeTop - 20, // Add small offset from top
+                  top: Math.max(0, relativeTop - 20), // Add small offset from top, ensure non-negative
                   behavior: 'smooth'
                 });
               }
@@ -775,13 +786,46 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
         } catch (err) {
           console.error('Error scrolling to paragraph edits:', err);
         }
-      }, 100); // Increased delay to ensure DOM is fully ready
+      }, 100); // Delay to ensure DOM is fully ready
     });
   }
   
   private triggerScrollToBottom(): void {
     this.shouldScrollToBottom = true;
     this.cdr.detectChanges();
+  }
+  
+  /** Scroll to the top of a specific message (used for final output to stay at top) */
+  private scrollToMessageTop(messageIndex: number): void {
+    // Scroll to message element (stay at top of the message)
+    // Use requestAnimationFrame to ensure DOM is fully rendered
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          const element = this.messagesContainer?.nativeElement;
+          if (element && messageIndex >= 0 && messageIndex < this.messages.length) {
+            // Find the message element
+            const messageElements = element.querySelectorAll('.message');
+            if (messageElements[messageIndex]) {
+              const messageElement = messageElements[messageIndex];
+              
+              // Scroll to the message element (top of message)
+              const containerRect = element.getBoundingClientRect();
+              const elementRect = messageElement.getBoundingClientRect();
+              const relativeTop = elementRect.top - containerRect.top + element.scrollTop;
+              
+              // Scroll container to show the top of message
+              element.scrollTo({
+                top: relativeTop - 20, // Add small offset from top
+                behavior: 'smooth'
+              });
+            }
+          }
+        } catch (err) {
+          console.error('Error scrolling to message top:', err);
+        }
+      }, 100); // Delay to ensure DOM is fully ready
+    });
   }
   
   @HostListener('document:click', ['$event'])
