@@ -614,14 +614,11 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
             }
             
             // If this is a final output message (has thoughtLeadership with topic 'Final Revised Article'),
-            // scroll to the top of the message instead of bottom
+            // don't scroll - keep user at paragraph edits section
             if (workflowMessage.message.thoughtLeadership?.topic === 'Final Revised Article') {
               this.saveCurrentSession();
               this.cdr.detectChanges();
-              setTimeout(() => {
-                const messageIndex = this.messages.length - 1;
-                this.scrollToMessageTop(messageIndex);
-              }, 100);
+              // Don't scroll - keep user's current position at paragraph edits
               return;
             }
           }
@@ -752,7 +749,7 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   private scrollToParagraphEdits(messageIndex: number): void {
-    // Scroll to paragraph edits component (stay at top of paragraph edits section)
+    // Scroll to paragraph edits instructions section (top of paragraph edits, not bottom buttons)
     // Use requestAnimationFrame to ensure DOM is fully rendered
     requestAnimationFrame(() => {
       setTimeout(() => {
@@ -765,13 +762,20 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
               const messageElement = messageElements[messageIndex];
               const paragraphEditsElement = messageElement.querySelector('app-paragraph-edits');
               if (paragraphEditsElement) {
-                // Scroll to the paragraph edits component (top of paragraph edits section)
+                // Try to find the result-title or paragraph-instructions within paragraph edits
+                // This ensures we scroll to the instructions area, not the bottom buttons
+                const titleElement = paragraphEditsElement.querySelector('.result-title') || 
+                                   paragraphEditsElement.querySelector('.paragraph-instructions') ||
+                                   paragraphEditsElement.querySelector('.result-section');
+                
+                const targetElement = titleElement || paragraphEditsElement;
+                
                 // Calculate position relative to scroll container
                 const containerRect = element.getBoundingClientRect();
-                const elementRect = paragraphEditsElement.getBoundingClientRect();
+                const elementRect = targetElement.getBoundingClientRect();
                 const relativeTop = elementRect.top - containerRect.top + element.scrollTop;
                 
-                // Scroll container to show the top of paragraph edits section with small offset
+                // Scroll container to show the top of paragraph edits instructions with small offset
                 element.scrollTo({
                   top: Math.max(0, relativeTop - 20), // Add small offset from top, ensure non-negative
                   behavior: 'smooth'
