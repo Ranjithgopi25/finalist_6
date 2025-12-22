@@ -720,7 +720,8 @@ export class ChatEditWorkflowService {
       current: index + 1,
       total: normalizedEditorIds.length
     }));
-    // Initialize totalEditors from normalized editor list (matches guided journey line 368)
+    // 🔒 LOCK totalEditors ONCE - NEVER UPDATE FROM BACKEND
+    // This represents the original editor count and must remain constant throughout the workflow
     this.totalEditors = normalizedEditorIds.length;
 
     // Use default temperature (0.15) - optimal for editing: allows minor improvements while staying deterministic
@@ -774,29 +775,10 @@ export class ChatEditWorkflowService {
           if (data.current_editor) {
             this.currentEditor = data.current_editor;
             this.currentEditorIndex = data.editor_index || 0;
-            // Update totalEditors from backend, or preserve existing value (matches guided journey line 409)
-            this.totalEditors = data.total_editors || this.totalEditors;
-            
-            // Ensure totalEditors is valid (fallback to normalizedEditorIds length if needed)
-            if (!this.totalEditors || this.totalEditors === 0) {
-              this.totalEditors = normalizedEditorIds.length;
-              console.warn('[ChatEditWorkflowService] totalEditors was 0, using normalizedEditorIds.length:', this.totalEditors);
-            }
-            
-            // Use EXACT same calculation as guided journey (line 410)
-            // Guided journey uses: (data.editor_index || 0) >= (data.total_editors || 1) - 1
-            // But we use this.totalEditors as fallback instead of hardcoded 1 for better reliability
-            this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || this.totalEditors || 1) - 1;
-            
-            console.log('[ChatEditWorkflowService] Editor complete (initial) - isLastEditor calculation:', {
-              editor_index: data.editor_index,
-              data_total_editors: data.total_editors,
-              this_totalEditors: this.totalEditors,
-              normalizedEditorIds_length: normalizedEditorIds.length,
-              calculation: `(${data.editor_index || 0}) >= (${data.total_editors || this.totalEditors || 1} - 1)`,
-              result: `${data.editor_index || 0} >= ${(data.total_editors || this.totalEditors || 1) - 1}`,
-              isLastEditor: this.isLastEditor
-            });
+            // 🔒 totalEditors is locked at initialization - DO NOT update from backend
+            // ❌ DO NOT calculate isLastEditor here - only set on all_complete
+            // ✅ Always false during editor_complete - final state comes from all_complete event
+            this.isLastEditor = false;
           }
           
           const completedEditor = editorProgressList.find(e => e.editorId === data.current_editor || e.editorId === data.editor);
@@ -1511,10 +1493,10 @@ export class ChatEditWorkflowService {
       this.threadId = threadIdFromMessage;
     }
 
-    // Ensure totalEditors is set (preserve from initial processContent or use selectedEditors length)
+    // 🔒 totalEditors is locked at initialization - DO NOT recalculate here
+    // If it's 0, that means processContent() was never called, which is an error state
     if (!this.totalEditors || this.totalEditors === 0) {
-      this.totalEditors = this.currentState.selectedEditors.length;
-      console.log('[ChatEditWorkflowService] totalEditors was missing, initialized from selectedEditors:', this.totalEditors);
+      console.error('[ChatEditWorkflowService] totalEditors is 0 - processContent() should have initialized it');
     }
 
     if (paragraphEdits && paragraphEdits.length > 0) {
@@ -1594,7 +1576,7 @@ export class ChatEditWorkflowService {
                 
                 if (data.type === 'all_complete') {
                   this.isGeneratingNextEditorSubject.next(false);
-                  // Mark as last editor to show "Generate Final Output" button (matches guided journey line 1324-1325)
+                  // ✅ ONLY PLACE isLastEditor can be true - backend explicitly signals workflow completion
                   this.isLastEditor = true;
                   this.currentEditorIndex = this.totalEditors;
                   
@@ -1628,29 +1610,10 @@ export class ChatEditWorkflowService {
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
                     this.currentEditorIndex = data.editor_index || 0;
-                    // Update totalEditors from backend, or preserve existing value (matches guided journey line 1348)
-                    this.totalEditors = data.total_editors || this.totalEditors;
-                    
-                    // Ensure totalEditors is valid (fallback to selectedEditors length if needed)
-                    if (!this.totalEditors || this.totalEditors === 0) {
-                      this.totalEditors = this.currentState.selectedEditors.length;
-                      console.warn('[ChatEditWorkflowService] totalEditors was 0 in nextEditor, using selectedEditors.length:', this.totalEditors);
-                    }
-                    
-                    // Use EXACT same calculation as guided journey (line 1349)
-                    // Guided journey uses: (data.editor_index || 0) >= (data.total_editors || 1) - 1
-                    // But we use this.totalEditors as fallback instead of hardcoded 1 for better reliability
-                    this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || this.totalEditors || 1) - 1;
-                    
-                    console.log('[ChatEditWorkflowService] Editor complete (nextEditor) - isLastEditor calculation:', {
-                      editor_index: data.editor_index,
-                      data_total_editors: data.total_editors,
-                      this_totalEditors: this.totalEditors,
-                      selectedEditors_length: this.currentState.selectedEditors.length,
-                      calculation: `(${data.editor_index || 0}) >= (${data.total_editors || this.totalEditors || 1} - 1)`,
-                      result: `${data.editor_index || 0} >= ${(data.total_editors || this.totalEditors || 1) - 1}`,
-                      isLastEditor: this.isLastEditor
-                    });
+                    // 🔒 totalEditors is locked at initialization - DO NOT update from backend
+                    // ❌ DO NOT calculate isLastEditor here - only set on all_complete
+                    // ✅ Always false during editor_complete - final state comes from all_complete event
+                    this.isLastEditor = false;
                   }
 
                   let newParagraphEdits: ParagraphEdit[] = [];
