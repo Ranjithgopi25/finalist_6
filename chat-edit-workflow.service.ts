@@ -1477,6 +1477,22 @@ export class ChatEditWorkflowService {
     // Combine all original paragraphs
     return sortedEdits.map(p => p.original).filter(p => p && p.trim()).join('\n\n');
   }
+
+  /** Collect editorial feedback decisions for a paragraph (matches guided journey) */
+  private collectFeedbackDecisions(para: ParagraphEdit): any {
+    const decisions: any = {};
+    const feedbackTypes = Object.keys(para.editorial_feedback || {});
+    
+    for (const editorType of feedbackTypes) {
+      const feedbacks = (para.editorial_feedback as any)[editorType] || [];
+      decisions[editorType] = feedbacks.map((fb: any) => ({
+        issue: fb.issue,
+        approved: fb.approved === true
+      }));
+    }
+    
+    return decisions;
+  }
   
   /** Move to next editor in sequential workflow */
   async nextEditor(paragraphEdits: ParagraphEdit[], threadIdFromMessage?: string | null): Promise<void> {
@@ -1508,6 +1524,11 @@ export class ChatEditWorkflowService {
       this.syncParagraphEditsFromMessage(paragraphEdits);
     }
 
+    // Use synced paragraph edits from state (ensures we have the latest state)
+    const currentParagraphEdits = this.currentState.paragraphEdits.length > 0 
+      ? this.currentState.paragraphEdits 
+      : paragraphEdits;
+
     if (!this.allParagraphsDecided) {
       const errorMessage: Message = {
         role: 'assistant',
@@ -1521,18 +1542,19 @@ export class ChatEditWorkflowService {
     this.isGeneratingNextEditorSubject.next(true);
 
     try {
-      const decisions = paragraphEdits.map(para => ({
+      const decisions = currentParagraphEdits.map(para => ({
         index: para.index,
         approved: para.approved === true
       }));
 
-      const paragraph_edits_data = paragraphEdits.map(para => ({
+      const paragraph_edits_data = currentParagraphEdits.map(para => ({
         index: para.index,
         original: para.original,
         edited: para.edited,
         tags: para.tags || [],
         autoApproved: para.autoApproved || false,
-        approved: para.approved
+        approved: para.approved,
+        editorial_feedback: para.editorial_feedback || {}
       }));
 
       const apiUrl = (window as any)._env?.apiUrl || '';
@@ -1678,6 +1700,7 @@ export class ChatEditWorkflowService {
                 if (data.type === 'editor_complete') {
                   if (data.thread_id) {
                     this.threadId = data.thread_id;
+                    this.isSequentialMode = true;
                   }
 
                   if (data.current_editor) {
@@ -1822,9 +1845,11 @@ export class ChatEditWorkflowService {
     this.isGeneratingFinalSubject.next(true);
     
     try {
+      // Collect decisions with feedback decisions (matches guided journey)
       const decisions = this.currentState.paragraphEdits.map(p => ({
         index: p.index,
-        approved: p.approved === true
+        approved: p.approved === true,
+        editorial_feedback_decisions: this.collectFeedbackDecisions(p)
       }));
       
       // Get originalContent - use service state if available, otherwise reconstruct from paragraphEdits
@@ -1849,9 +1874,12 @@ export class ChatEditWorkflowService {
             index: p.index,
             original: p.original,
             edited: p.edited,
-            tags: p.tags
+            tags: p.tags,
+            editorial_feedback: p.editorial_feedback || {}
           })),
-          decisions: decisions
+          decisions: decisions,
+          include_quality_checks: true,
+          include_copy_check: true
         })
       });
       
