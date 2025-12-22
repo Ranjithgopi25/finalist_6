@@ -762,23 +762,17 @@ export class ChatEditWorkflowService {
             fullResponse += data.content;
           }
         } else if (data.type === 'editor_complete') {
-          // Sequential workflow: Handle single editor completion
           console.log('[ChatEditWorkflowService] Editor complete:', data);
           
-          // Store thread_id for sequential workflow
           if (data.thread_id) {
             this.threadId = data.thread_id;
             this.isSequentialMode = true;
           }
           
-          // Store current editor info
           if (data.current_editor) {
             this.currentEditor = data.current_editor;
             this.currentEditorIndex = data.editor_index || 0;
-            // Ensure total_editors is set correctly - use backend value or keep existing
             this.totalEditors = data.total_editors || this.totalEditors;
-            // Calculate isLastEditor: editor_index is 0-based, so last editor is at index (total_editors - 1)
-            // Use data values directly with safe fallbacks (matching Guided Journey)
             this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || 1) - 1;
           }
           
@@ -791,7 +785,6 @@ export class ChatEditWorkflowService {
             fullResponse = data.revised_content || data.final_revised || '';
           }
           
-          // Process paragraph edits from editor_complete (same structure as final_complete)
           let paragraphEdits: ParagraphEdit[] = [];
           if (data.paragraph_edits && Array.isArray(data.paragraph_edits)) {
             console.log('[ChatEditWorkflowService] Paragraph edits received:', data.paragraph_edits);
@@ -860,7 +853,6 @@ export class ChatEditWorkflowService {
               originalContent: preservedOriginalContent
             });
             
-            // Dispatch paragraph edits message with sequential metadata
             const paragraphMessage: Message = {
               role: 'assistant',
               content: '',
@@ -882,7 +874,6 @@ export class ChatEditWorkflowService {
             this.messageSubject.next({ type: 'result', message: paragraphMessage });
           }
           
-          // Update content
           if (data.original_content) {
             this.updateState({
               ...this.currentState,
@@ -1479,7 +1470,6 @@ export class ChatEditWorkflowService {
   
   /** Move to next editor in sequential workflow */
   async nextEditor(paragraphEdits: ParagraphEdit[], threadIdFromMessage?: string | null): Promise<void> {
-    // Use threadId from message if service's threadId is null (same as Guided Journey)
     const effectiveThreadId = this.threadId || threadIdFromMessage;
     
     if (!effectiveThreadId) {
@@ -1498,8 +1488,6 @@ export class ChatEditWorkflowService {
       this.threadId = threadIdFromMessage;
     }
 
-    // SYNC STATE FIRST before checking allParagraphsDecided
-    // This ensures that approve/reject all actions are reflected in service state
     if (paragraphEdits && paragraphEdits.length > 0) {
       this.syncParagraphEditsFromMessage(paragraphEdits);
     }
@@ -1514,21 +1502,14 @@ export class ChatEditWorkflowService {
       return;
     }
 
-    // Set generating state for next editor (keep previous editor visible while loading)
     this.isGeneratingNextEditorSubject.next(true);
 
-    // Don't clear paragraph edits - keep previous editor visible until new one is generated
-    // The loading state will be shown in the button text ("Loading Next Editor...")
-    // No need to emit update message here - existing paragraph edits stay visible
-
     try {
-      // Collect decisions from paragraphEdits
       const decisions = paragraphEdits.map(para => ({
         index: para.index,
         approved: para.approved === true
       }));
 
-      // Prepare paragraph_edits (matching guided journey format - no editorial_feedback, block_type, or level)
       const paragraph_edits_data = paragraphEdits.map(para => ({
         index: para.index,
         original: para.original,
@@ -1538,7 +1519,6 @@ export class ChatEditWorkflowService {
         approved: para.approved
       }));
 
-      // Get API URL from environment (supports runtime config via window._env)
       const apiUrl = (window as any)._env?.apiUrl || '';
       const response = await fetch(`${apiUrl}/api/v1/tl/edit-content/next`, {
         method: 'POST',
@@ -1546,7 +1526,7 @@ export class ChatEditWorkflowService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          thread_id: effectiveThreadId,  // Use effectiveThreadId (same as Guided Journey uses this.threadId)
+          thread_id: effectiveThreadId,
           paragraph_edits: paragraph_edits_data,
           decisions: decisions,
           accept_all: false,
@@ -1583,79 +1563,58 @@ export class ChatEditWorkflowService {
               try {
                 const data = JSON.parse(dataStr);
                 
-                // Handle all_complete (final confirmation from backend that all editors have finished)
                 if (data.type === 'all_complete') {
-                  // Update editor info if provided
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
                   }
                   if (data.total_editors !== undefined && data.total_editors !== null) {
                     this.totalEditors = data.total_editors;
                   }
-                  
-                  // CRITICAL FIX: Only trust currentEditorIndex which is updated by editor_complete events
-                  // Do NOT trust data.editor_index from all_complete as it may be incorrect, arrive early, or use different indexing
-                  // currentEditorIndex is the ONLY reliable source of truth since it's only updated when editor_complete is processed
-                  const expectedLastIndex = (this.totalEditors || 1) - 1; // 0-based last index
-                  
-                  // Only accept all_complete if currentEditorIndex indicates we've processed all editors
-                  // This ensures we've actually seen editor_complete events for all editors before accepting all_complete
+
+                  const expectedLastIndex = (this.totalEditors || 1) - 1;
                   if (this.currentEditorIndex < expectedLastIndex) {
-                    console.warn('[ChatEditWorkflowService] Received all_complete prematurely. Current editor index:', this.currentEditorIndex, 'Expected last index:', expectedLastIndex, 'Total editors:', this.totalEditors, 'Ignoring all_complete and waiting for editor_complete events');
-                    // Don't process this all_complete - skip it and let editor_complete handle the actual completion
-                    // Continue to next iteration of the loop to process editor_complete
-                  } else {
-                    // We've processed all editors (currentEditorIndex >= expectedLastIndex), so all_complete is valid
-                    // This means we've seen editor_complete events for all editors, so it's safe to mark as complete
-                    // Mark as last editor to show "Generate Final Output" button only (matching Guided Journey behavior)
-                    this.isLastEditor = true;
-                    this.currentEditorIndex = this.totalEditors;
-
-                    // Reset generating state before emitting update message
-                    this.isGeneratingNextEditorSubject.next(false);
-
-                    const updateMessage: Message = {
-                      role: 'assistant',
-                      content: '',
-                      timestamp: new Date(),
-                      isHtml: false,
-                      editWorkflow: {
-                        step: 'awaiting_approval',
-                        paragraphEdits: [...this.currentState.paragraphEdits],
-                        showCancelButton: false,
-                        showSimpleCancelButton: true,
-                        threadId: this.threadId,
-                        currentEditor: this.currentEditor,
-                        isSequentialMode: this.isSequentialMode,
-                        isLastEditor: true, // All editors complete - only show Generate Final Output
-                        currentEditorIndex: this.currentEditorIndex,
-                        totalEditors: this.totalEditors
-                      }
-                    };
-                    this.messageSubject.next({ type: 'update', message: updateMessage });
-                    return;
+                    console.warn('[ChatEditWorkflowService] Received all_complete prematurely. Current:', this.currentEditorIndex, 'Expected:', expectedLastIndex, 'Total:', this.totalEditors);
+                    continue;
                   }
+                  
+                  this.isLastEditor = true;
+                  this.currentEditorIndex = this.totalEditors;
+                  this.isGeneratingNextEditorSubject.next(false);
+
+                  const updateMessage: Message = {
+                    role: 'assistant',
+                    content: '',
+                    timestamp: new Date(),
+                    isHtml: false,
+                    editWorkflow: {
+                      step: 'awaiting_approval',
+                      paragraphEdits: [...this.currentState.paragraphEdits],
+                      showCancelButton: false,
+                      showSimpleCancelButton: true,
+                      threadId: this.threadId,
+                      currentEditor: this.currentEditor,
+                      isSequentialMode: this.isSequentialMode,
+                      isLastEditor: true,
+                      currentEditorIndex: this.currentEditorIndex,
+                      totalEditors: this.totalEditors
+                    }
+                  };
+                  this.messageSubject.next({ type: 'update', message: updateMessage });
+                  return;
                 }
 
-                // Handle editor_complete (same as initial flow)
                 if (data.type === 'editor_complete') {
-                  // Store thread_id
                   if (data.thread_id) {
                     this.threadId = data.thread_id;
                   }
 
-                  // Store current editor info
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
                     this.currentEditorIndex = data.editor_index || 0;
-                    // Ensure total_editors is set correctly - use backend value or keep existing
                     this.totalEditors = data.total_editors || this.totalEditors;
-                    // Calculate isLastEditor: editor_index is 0-based, so last editor is at index (total_editors - 1)
-                    // Use data values directly with safe fallbacks (matching Guided Journey)
                     this.isLastEditor = (data.editor_index || 0) >= (data.total_editors || 1) - 1;
                   }
 
-                  // Process paragraph edits
                   let newParagraphEdits: ParagraphEdit[] = [];
                   if (data.paragraph_edits && Array.isArray(data.paragraph_edits)) {
                     const allEditorNames = this.currentState.selectedEditors.map(editorId => {
@@ -1708,8 +1667,8 @@ export class ChatEditWorkflowService {
                         autoApproved: autoApproved,
                         approved: approved,
                         editorial_feedback: editorial_feedback,
-                        displayOriginal: undefined, // Clear to ensure default highlighting works
-                        displayEdited: undefined // Clear to ensure default highlighting works
+                        displayOriginal: undefined,
+                        displayEdited: undefined
                       } as ParagraphEdit;
                     });
                   }
@@ -1722,16 +1681,13 @@ export class ChatEditWorkflowService {
                     });
                   }
 
-                  // Update state with new paragraph edits
                   this.updateState({
                     ...this.currentState,
                     paragraphEdits: newParagraphEdits
                   });
 
-                  // Reset generating state before dispatching new paragraph edits
                   this.isGeneratingNextEditorSubject.next(false);
 
-                  // Dispatch paragraph edits message with sequential metadata (use update to update same message)
                   const paragraphMessage: Message = {
                     role: 'assistant',
                     content: '',
@@ -1748,14 +1704,12 @@ export class ChatEditWorkflowService {
                       isLastEditor: this.isLastEditor,
                       currentEditorIndex: this.currentEditorIndex,
                       totalEditors: this.totalEditors,
-                      isGeneratingNextEditor: false // No longer generating
+                      isGeneratingNextEditor: false
                     }
                   };
-                  // Use 'update' type to update the same message instead of creating a new one
                   this.messageSubject.next({ type: 'update', message: paragraphMessage });
                 }
 
-                // Handle errors
                 if (data.type === 'error') {
                   throw new Error(data.error || 'Unknown error');
                 }
