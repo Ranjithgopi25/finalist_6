@@ -774,6 +774,8 @@ export class ChatEditWorkflowService {
           
           if (data.current_editor) {
             this.currentEditor = data.current_editor;
+            // Note: currentEditorIndex is 0-based (0, 1, 2, ...) matching backend editor_index
+            // UI should display as (currentEditorIndex + 1) for user-friendly "Editor 1", "Editor 2", etc.
             this.currentEditorIndex = data.editor_index || 0;
             // 🔒 totalEditors is locked at initialization - DO NOT update from backend
             // ❌ DO NOT calculate isLastEditor here - only set on all_complete
@@ -923,6 +925,11 @@ export class ChatEditWorkflowService {
           };
           this.messageSubject.next({ type: 'prompt', message: errorMessage });
         } else if (data.type === 'final_complete') {
+          // Defensive: Ensure isLastEditor is set even if all_complete was missed
+          // This hardens against backend event reordering or missing events
+          this.isLastEditor = true;
+          this.currentEditorIndex = this.totalEditors;
+          
           combinedFeedback = data.combined_feedback || '';
           finalRevisedContent = data.final_revised || '';
           
@@ -1578,6 +1585,7 @@ export class ChatEditWorkflowService {
                   this.isGeneratingNextEditorSubject.next(false);
                   // ✅ ONLY PLACE isLastEditor can be true - backend explicitly signals workflow completion
                   this.isLastEditor = true;
+                  // Set to totalEditors (0-based: last editor is at index totalEditors - 1, but we use totalEditors for display consistency)
                   this.currentEditorIndex = this.totalEditors;
                   
                   const updateMessage: Message = {
@@ -1609,6 +1617,8 @@ export class ChatEditWorkflowService {
 
                   if (data.current_editor) {
                     this.currentEditor = data.current_editor;
+                    // Note: currentEditorIndex is 0-based (0, 1, 2, ...) matching backend editor_index
+                    // UI should display as (currentEditorIndex + 1) for user-friendly "Editor 1", "Editor 2", etc.
                     this.currentEditorIndex = data.editor_index || 0;
                     // 🔒 totalEditors is locked at initialization - DO NOT update from backend
                     // ❌ DO NOT calculate isLastEditor here - only set on all_complete
@@ -1857,7 +1867,12 @@ export class ChatEditWorkflowService {
       
       // Send final article message (paragraph edits remain visible in previous message)
       this.messageSubject.next({ type: 'result', message: finalMessage });
-      this.completeWorkflow();
+      
+      // Add small delay before resetting workflow state to prevent race conditions with UI rendering
+      // This ensures the final message is fully rendered before state is cleared
+      setTimeout(() => {
+        this.completeWorkflow();
+      }, 150);
       
     } catch (error) {
       console.error('Error generating final article:', error);
