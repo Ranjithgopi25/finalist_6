@@ -546,10 +546,15 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
                 const hasNewParagraphEdits = workflowMessage.message.editWorkflow.paragraphEdits && 
                   workflowMessage.message.editWorkflow.paragraphEdits.length > 0;
                 
-                // Update all editWorkflow properties
                 existingMessage.editWorkflow = {
                   ...existingMessage.editWorkflow,
                   ...workflowMessage.message.editWorkflow,
+                  threadId: workflowMessage.message.editWorkflow.threadId ?? existingMessage.editWorkflow.threadId,
+                  currentEditor: workflowMessage.message.editWorkflow.currentEditor ?? existingMessage.editWorkflow.currentEditor,
+                  isSequentialMode: workflowMessage.message.editWorkflow.isSequentialMode ?? existingMessage.editWorkflow.isSequentialMode,
+                  isLastEditor: workflowMessage.message.editWorkflow.isLastEditor ?? existingMessage.editWorkflow.isLastEditor,
+                  currentEditorIndex: workflowMessage.message.editWorkflow.currentEditorIndex ?? existingMessage.editWorkflow.currentEditorIndex,
+                  totalEditors: workflowMessage.message.editWorkflow.totalEditors ?? existingMessage.editWorkflow.totalEditors,
                   paragraphEdits: workflowMessage.message.editWorkflow.paragraphEdits 
                     ? [...workflowMessage.message.editWorkflow.paragraphEdits]
                     : existingMessage.editWorkflow.paragraphEdits
