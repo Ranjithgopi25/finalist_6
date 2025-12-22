@@ -584,6 +584,18 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
             // Regular message, add it
             console.log('[ChatComponent] Adding regular workflow message');
             this.messages.push(workflowMessage.message);
+            
+            // If this message has paragraph edits, scroll to paragraph edits section instead of bottom
+            if (workflowMessage.message.editWorkflow?.paragraphEdits && 
+                workflowMessage.message.editWorkflow.paragraphEdits.length > 0) {
+              this.saveCurrentSession();
+              this.cdr.detectChanges();
+              setTimeout(() => {
+                const messageIndex = this.messages.length - 1;
+                this.scrollToParagraphEdits(messageIndex);
+              }, 100);
+              return;
+            }
           }
           
           this.saveCurrentSession();
@@ -712,7 +724,7 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   private scrollToParagraphEdits(messageIndex: number): void {
-    // Match guided journey scroll behavior: smooth, block: 'start', inline: 'nearest', timeout: 100ms
+    // Scroll to paragraph edits component (stay at top of paragraph edits section)
     setTimeout(() => {
       try {
         const element = this.messagesContainer?.nativeElement;
@@ -723,23 +735,12 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
             const messageElement = messageElements[messageIndex];
             const paragraphEditsElement = messageElement.querySelector('app-paragraph-edits');
             if (paragraphEditsElement) {
-              // Try to find the editorial feedback section first (paragraph feedback)
-              const feedbackSection = paragraphEditsElement.querySelector('.editorial-feedback-list');
-              if (feedbackSection) {
-                // Scroll to the first feedback section
-                (feedbackSection as HTMLElement).scrollIntoView({ 
-                  behavior: 'smooth', 
-                  block: 'start',
-                  inline: 'nearest'
-                });
-              } else {
-                // Fallback to scrolling to the paragraph edits component
-                paragraphEditsElement.scrollIntoView({ 
-                  behavior: 'smooth', 
-                  block: 'start',
-                  inline: 'nearest'
-                });
-              }
+              // Scroll to the paragraph edits component (top of paragraph edits section)
+              paragraphEditsElement.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'start',
+                inline: 'nearest'
+              });
             } else {
               // Fallback to scrolling to the message
               messageElement.scrollIntoView({ 
@@ -2356,8 +2357,13 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   getParagraphEditsGeneratingState(message: Message): boolean {
-    // Return the service's generating state (both final and next editor)
-    return this.editWorkflowService.isGeneratingFinal || this.editWorkflowService.isGeneratingNextEditor;
+    // Return only final output generating state (for Generate Final Output button)
+    return this.editWorkflowService.isGeneratingFinal;
+  }
+
+  getParagraphEditsNextEditorGeneratingState(message: Message): boolean {
+    // Return only next editor generating state (for Next Editor button)
+    return this.editWorkflowService.isGeneratingNextEditor;
   }
 
   private clearWorkflowState(): void {
