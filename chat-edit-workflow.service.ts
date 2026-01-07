@@ -1033,24 +1033,47 @@ export class ChatService {
 
   // NEW: Thought Leadership Section Methods (5 Sections)
 
-  streamDraftContent(messages: Message[], improvementPrompt?: string, draftParams?: any): Observable<any> {
+  streamDraftContent(
+    payload: Message[] | {
+      messages: Message[],
+      content_type?: string,
+      topic?: string,
+      word_limit?: string,
+      audience_tone?: string,
+      outline?: { type: string, content: string },
+      supporting_documents?: { content: string },
+      research?: any,
+      stream: boolean
+    },
+    improvementPrompt?: string,
+    draftParams?: any
+  ): Observable<any> {
     return new Observable(observer => {
-      const request: any = { messages, stream: true };
-      
-      // Add improvement_prompt to request if provided
-      if (improvementPrompt) {
-        request.improvement_prompt = improvementPrompt;
-      }
-      
-      // Add draft parameters for improvement iterations
-      if (draftParams) {
-        if (draftParams.contentType) request.content_type = draftParams.contentType;
-        if (draftParams.topic) request.topic = draftParams.topic;
-        if (draftParams.wordLimit) request.word_limit = draftParams.wordLimit;
-        if (draftParams.audienceTone) request.audience_tone = draftParams.audienceTone;
-        if (draftParams.outlineDoc) request.outline_doc = draftParams.outlineDoc;
-        if (draftParams.supportingDoc) request.supporting_doc = draftParams.supportingDoc;
-        if (draftParams.useFactivaResearch !== undefined) request.use_factiva_research = draftParams.useFactivaResearch;
+      let request: any;
+
+      // Check if payload is an array (old format for improvement iterations) or structured object (new format)
+      if (Array.isArray(payload)) {
+        // Old format: Message[] for improvement iterations
+        request = { messages: payload, stream: true };
+        
+        // Add improvement_prompt to request if provided
+        if (improvementPrompt) {
+          request.improvement_prompt = improvementPrompt;
+        }
+        
+        // Add draft parameters for improvement iterations
+        if (draftParams) {
+          if (draftParams.contentType) request.content_type = draftParams.contentType;
+          if (draftParams.topic) request.topic = draftParams.topic;
+          if (draftParams.wordLimit) request.word_limit = draftParams.wordLimit;
+          if (draftParams.audienceTone) request.audience_tone = draftParams.audienceTone;
+          if (draftParams.outlineDoc) request.outline_doc = draftParams.outlineDoc;
+          if (draftParams.supportingDoc) request.supporting_doc = draftParams.supportingDoc;
+          if (draftParams.useFactivaResearch !== undefined) request.use_factiva_research = draftParams.useFactivaResearch;
+        }
+      } else {
+        // New format: Structured payload object with all fields
+        request = payload;
       }
 
       this.authenticatedFetch(`${this.apiUrl}/api/v1/tl/draft-content`, {
@@ -1230,9 +1253,12 @@ export class ChatService {
     });
   }
 
-  streamRefineContent(messages: Message[]): Observable<any> {
+  // Accept either an array of messages OR a structured payload { messages, original_content, services, stream }
+  streamRefineContent(payload: Message[] | { messages: Message[]; original_content?: string; services?: any[]; stream?: boolean }): Observable<any> {
     return new Observable(observer => {
-      const request = { messages, stream: true };
+      const request = Array.isArray(payload)
+        ? { messages: payload, stream: true }
+        : { messages: payload.messages || [], original_content: (payload as any).original_content, services: (payload as any).services, stream: (payload as any).stream ?? true };
 
       this.authenticatedFetch(`${this.apiUrl}/api/v1/tl/refine-content`, {
         method: 'POST',
@@ -1522,5 +1548,51 @@ exportPdfStandalone(payload: {
     { responseType: 'blob' }
   );
 }
+
+  /**
+   * Export edit content to Word document with HTML formatting and block types
+   * @param payload Object containing content, title, htmlContent, and blockTypes
+   * @returns Observable of Blob containing Word document
+   */
+  exportEditContentToWord(payload: {
+    content: string;
+    title: string;
+    htmlContent: string;
+    blockTypes?: Array<{index: number; type: string; level?: number}>;
+  }): Observable<Blob> {
+    return this.http.post(
+      `${this.apiUrl}/api/v1/export/edit-content/word`,
+      {
+        content: payload.content,
+        title: payload.title,
+        html_content: payload.htmlContent,
+        block_types: payload.blockTypes || []
+      },
+      { responseType: 'blob' }
+    );
+  }
+
+  /**
+   * Export edit content to PDF document with HTML formatting and block types
+   * @param payload Object containing content, title, htmlContent, and blockTypes
+   * @returns Observable of Blob containing PDF document
+   */
+  exportEditContentToPDF(payload: {
+    content: string;
+    title: string;
+    htmlContent: string;
+    blockTypes?: Array<{index: number; type: string; level?: number}>;
+  }): Observable<Blob> {
+    return this.http.post(
+      `${this.apiUrl}/api/v1/export/edit-content/pdf-pwc`,
+      {
+        content: payload.content,
+        title: payload.title,
+        html_content: payload.htmlContent,
+        block_types: payload.blockTypes || []
+      },
+      { responseType: 'blob' }
+    );
+  }
 }
 
