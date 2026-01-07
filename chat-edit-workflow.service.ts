@@ -1,1598 +1,842 @@
-import { Injectable } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, from, switchMap } from 'rxjs';
-import { Message, ChatRequest, DraftRequest, ThoughtLeadershipRequest, ResearchRequest, ArticleRequest, BestPracticesRequest, PodcastRequest, UpdateSectionRequest } from '../models';
-import { environment } from '../../../environments/environment';
-import { MsalService } from '@azure/msal-angular';
+import { Component, Input, ViewChild, ElementRef, HostListener, Output, EventEmitter, OnInit } from '@angular/core';
 
-// Chat History Models
-export interface ChatSessionSummary {
-  session_id: string;
-  source: string;
-  title?: string;
-  preview: string;
-  message_count: number;
-  created_at: string;
-  updated_at: string;
-}
+import { HttpClient } from '@angular/common/http';
+import { ThoughtLeadershipMetadata, Message } from '../../../../../core/models';
+import { CanvasStateService } from '../../../../../core/services/canvas-state.service';
+import { TlChatBridgeService } from '../../../../../core/services/tl-chat-bridge.service';
+import { environment } from '../../../../../../environments/environment';
+import { TlRequestFormComponent } from '../../../../phoenix/TL/request-form';
+import { AuthFetchService } from '../../../../../core/services/auth-fetch.service';
+import { ChatService } from '../../../../../core/services/chat.service';
+import { BlockTypeInfo, extractDocumentTitle } from '../../../../../core/utils/edit-content.utils';
 
-export interface ChatSessionDetail {
-  session_id: string;
-  source: string;
-  title?: string;
-  conversation: {
-    messages: Message[];
-  };
-  created_at: string;
-  updated_at: string;
-}
-
-@Injectable({
-  providedIn: 'root'
+@Component({
+    selector: 'app-tl-action-buttons',
+    imports: [TlRequestFormComponent],
+    templateUrl: './tl-action-buttons.component.html',
+    styleUrls: ['./tl-action-buttons.component.scss']
 })
-export class ChatService {
-  private get apiUrl(): string {
-    // Support runtime configuration via window._env (for production)
-    return (window as any)._env?.apiUrl || environment.apiUrl || '';
-  }
+export class TlActionButtonsComponent implements OnInit {
+  @Input() metadata!: ThoughtLeadershipMetadata;
+  @Input() messageId?: string;
+  @Input() message?: Message; // Optional message for edit content export
+  @ViewChild('exportButton') exportButton?: ElementRef<HTMLButtonElement>;
   
+  isConvertingToPodcast = false;
+  showExportDropdown = false;
+  isCopied = false;
+  isExporting = false;
+  isExported = false;
+  exportFormat = '';
+  showRequestForm = false;
+  translatedContent = '';
+
+  @Output() raisePhoenix = new EventEmitter<void>();
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement;
+    const exportDropdown = target.closest('.export-dropdown');
+    if (!exportDropdown && this.showExportDropdown) {
+      this.showExportDropdown = false;
+    }
+  }
 
   constructor(
+    private canvasStateService: CanvasStateService,
     private http: HttpClient,
-    private msalService: MsalService
-  ) {
-    console.log('[ChatService] Constructor - apiUrl:', this.apiUrl);
-    console.log('[ChatService] window._env:', (window as any)._env);
-    console.log('[ChatService] environment.apiUrl:', environment.apiUrl);
+    private tlChatBridge: TlChatBridgeService,
+    private authFetchService: AuthFetchService,
+    private chatService: ChatService
+  ) {}
+  
+
+  ngOnInit(): void {
+    console.log('[TL Action Buttons] Component initialized with metadata:', {
+      contentType: this.metadata?.contentType,
+      hasPodcastUrl: !!this.metadata?.podcastAudioUrl,
+      podcastUrl: this.metadata?.podcastAudioUrl?.substring(0, 80),
+      showActions: this.metadata?.showActions,
+      isPodcast: this.isPodcast
+    });
+  }
+private exportWordNewLogic(): void {
+  if (!this.metadata.fullContent || !this.metadata.fullContent.trim()) {
+    alert('Content is not available yet.');
+    return;
   }
 
-  /**
-   * Get authentication headers for JSON requests
-   * MSAL interceptor only works with HttpClient, so we need to manually add headers for fetch()
-   */
-  private async getAuthHeaders(): Promise<Record<string, string>> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+  // Prepare content according to new logic
+  const plainText = this.metadata.fullContent
+    .replace(/<br>/g, '\n')
+    .replace(/<[^>]+>/g, ''); // strip HTML
+
+  const title = this.metadata.topic?.trim() || 'Generated Document';
+
+  const apiUrl = (window as any)._env?.apiUrl || environment.apiUrl || '';
+  const endpoint = `${apiUrl}/api/v1/export/word-standalone`; 
+
+  this.authFetchService.authenticatedFetch(endpoint, {
+    method: 'POST',
+    body: JSON.stringify({
+      content: plainText,
+      title,
+      content_type: this.metadata.contentType
+    })
+  })
+    .then(response => {
+      if (!response.ok) throw new Error('Failed to generate Word document');
+      return response.blob();
+    })
+    .then(blob => {
+      // Use existing download mechanism
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${this.sanitizeFilename(title)}.docx`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      this.resetExportState();
+    })
+    .catch(err => {
+      console.error('New Word export error:', err);
+      alert('Failed to generate Word document. Please try again.');
+      this.isExporting = false;
+    });
+}
+
+  downloadWord(): void {
+    this.exportDocument('/api/v1/export/word', 'docx', 'docx');
+  }
+
+  downloadPDF(): void {
+    this.exportDocument('/api/v1/export/pdf-pwc', 'pdf', 'pdf');
+  }
+  
+  downloadPPT(): void {
+    this.exportPPT('/api/v1/export/ppt');
+  }
+
+  downloadPodcast(): void {
+    if (this.metadata.podcastAudioUrl && this.metadata.podcastFilename) {
+      const link = document.createElement('a');
+      link.href = this.metadata.podcastAudioUrl;
+      link.download = this.metadata.podcastFilename;
+      link.click();
+    }
+  }
+  onRaisePhoenix(): void {
+    this.showRequestForm = true;
+    this.raisePhoenix.emit();
+  }
+  
+  phoenixRdpLink = '';
+  ticketNumber = '';
+
+  onTicketCreated(event: {
+  requestNumber: string;
+  phoenixRdpLink: string;
+  }): void {
+ this.phoenixRdpLink = event.phoenixRdpLink;
+ this.ticketNumber = event.requestNumber;
+  console.log('Ticket created:', event.requestNumber);
+  this.translatedContent = `✅ Request created successfully! Your request number is: <a href="${event.phoenixRdpLink}" target="_blank" rel="noopener noreferrer">${event.requestNumber}</a>`.trim();
+  this.showRequestForm = false;
+  this.sendToChat();
+}
+
+sendToChat(): void {
+
+  const topic = `Phoenix Request - ${this.ticketNumber}`;
+  let contentType: string;
+
+   
+    // Create metadata for the message
+    const metadata: ThoughtLeadershipMetadata = {
+      contentType: 'Phoenix_Request',
+      topic: topic,
+      fullContent: this.translatedContent,
+      showActions: false
     };
+  const chatMessage = this.translatedContent;
+   
+    // Send to chat via bridge
+    console.log('[FormatTranslatorFlow] Sending to chat with metadata:', metadata);
+    this.tlChatBridge.sendToChat(chatMessage, metadata);
+    //this.onClose();
+}
 
-    if (environment.useAuth) {
-      try {
-        const account = this.msalService.instance.getActiveAccount();
-        if (account) {
-          const response = await this.msalService.instance.acquireTokenSilent({
-            scopes: ['User.Read'], // Use the same scope as in protectedResourceMap
-            account: account
-          });
-          
-          if (response.idToken) {
-            headers['Authorization'] = `Bearer ${response.idToken}`;
-            console.log('[ChatService] Added auth header (ID token) to fetch() call');
-          }
-        }
-      } catch (error) {
-        console.error('[ChatService] Failed to acquire token for fetch():', error);
-      }
-    }
-
-    return headers;
-  }
-
-  /**
-   * Get authentication headers for FormData requests (no Content-Type header)
-   * Browser will automatically set Content-Type with multipart boundary
-   */
-  private async getAuthHeadersForFormData(): Promise<Record<string, string>> {
-    const headers: Record<string, string> = {};
-
-    if (environment.useAuth) {
-      try {
-        const account = this.msalService.instance.getActiveAccount();
-        if (account) {
-          const response = await this.msalService.instance.acquireTokenSilent({
-            scopes: ['User.Read'],
-            account: account
-          });
-          
-          if (response.idToken) {
-            headers['Authorization'] = `Bearer ${response.idToken}`;
-            console.log('[ChatService] Added auth header (ID token) to FormData fetch() call');
-          }
-        }
-      } catch (error) {
-        console.error('[ChatService] Failed to acquire token for FormData fetch():', error);
-      }
-    }
-
-    return headers;
-  }
-
-  /**
-   * Wrapper around fetch() that automatically adds authentication headers for JSON requests
-   * Use this instead of fetch() for all API calls with JSON body
-   */
-  private async authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
-    const authHeaders = await this.getAuthHeaders();
+  copyToClipboard(): void {
+    // Convert markdown to plain text for better readability when pasted
+    const plainText = this.convertMarkdownToPlainText(this.metadata.fullContent);
     
-    // Merge auth headers with any existing headers
-    const headers: Record<string, string> = {
-      ...authHeaders,
-      ...(options.headers as Record<string, string> || {})
-    };
-
-    console.log('[ChatService] authenticatedFetch - URL:', url);
-    console.log('[ChatService] authenticatedFetch - Has Authorization:', !!headers['Authorization']);
-
-    return fetch(url, {
-      ...options,
-      headers
+    navigator.clipboard.writeText(plainText).then(() => {
+      this.isCopied = true;
+      // Reset the "copied" feedback after 2 seconds
+      setTimeout(() => {
+        this.isCopied = false;
+      }, 2000);
+    }).catch(err => {
+      console.error('Failed to copy to clipboard:', err);
     });
   }
 
-  /**
-   * Wrapper around fetch() for FormData requests - doesn't set Content-Type (browser sets it with boundary)
-   * Use this for file uploads and multipart form data
-   */
-  private async authenticatedFetchFormData(url: string, options: RequestInit = {}): Promise<Response> {
-    const authHeaders = await this.getAuthHeadersForFormData();
+  private convertMarkdownToPlainText(markdown: string): string {
+    let text = markdown;
     
-    // Merge auth headers with any existing headers
-    const headers: Record<string, string> = {
-      ...authHeaders,
-      ...(options.headers as Record<string, string> || {})
-    };
-
-    console.log('[ChatService] authenticatedFetchFormData - URL:', url);
-    console.log('[ChatService] authenticatedFetchFormData - Has Authorization:', !!headers['Authorization']);
-
-    return fetch(url, {
-      ...options,
-      headers
+    // Remove markdown links [text](url) -> text
+    text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+    
+    // Remove markdown images ![alt](url) -> alt
+    text = text.replace(/!\[([^\]]*)\]\([^\)]+\)/g, '$1');
+    
+    // Convert bold **text** -> text
+    text = text.replace(/\*\*([^\*]+)\*\*/g, '$1');
+    
+    // Convert italic *text* -> text
+    text = text.replace(/\*([^\*]+)\*/g, '$1');
+    
+    // Convert italic _text_ -> text
+    text = text.replace(/_([^_]+)_/g, '$1');
+    
+    // Convert strikethrough ~~text~~ -> text
+    text = text.replace(/~~([^~]+)~~/g, '$1');
+    
+    // Convert headers # text -> text
+    text = text.replace(/^#+\s+/gm, '');
+    
+    // Convert horizontal rules
+    text = text.replace(/^[-*_]{3,}$/gm, '');
+    
+    // Convert code blocks ``` -> remove backticks
+    text = text.replace(/```[\s\S]*?```/g, (match) => {
+      return match.replace(/```/g, '').trim();
     });
+    
+    // Convert inline code `text` -> text
+    text = text.replace(/`([^`]+)`/g, '$1');
+    
+    // Convert blockquotes > text -> text
+    text = text.replace(/^>\s+/gm, '');
+    
+    // Convert unordered lists - * text -> text
+    text = text.replace(/^[\s]*[-*+]\s+/gm, '');
+    
+    // Convert ordered lists 1. text -> text
+    text = text.replace(/^[\s]*\d+\.\s+/gm, '');
+    
+    // Remove extra blank lines (more than 2 consecutive)
+    text = text.replace(/\n\n\n+/g, '\n\n');
+    
+    // Trim leading and trailing whitespace
+    text = text.trim();
+    
+    return text;
   }
 
-  detectEditIntent(input: string): Observable<{is_edit_intent: boolean, confidence: number, detected_editors?: string[]}> {
-    const fullUrl = `${this.apiUrl}/api/v1/chat/detect-edit-intent`;
-    console.log('[ChatService] detectEditIntent - Full URL:', fullUrl);
-    console.log('[ChatService] detectEditIntent - this.apiUrl:', this.apiUrl);
-    console.log('[ChatService] detectEditIntent - Expected to match: http://localhost:8000/api/v1/');
-    
-    return this.http.post<{is_edit_intent: boolean, confidence: number, detected_editors?: string[]}>(
-      fullUrl,
-      { input: input.trim() }
+  openInCanvas(): void {
+    if (!this.metadata.fullContent || !this.metadata.fullContent.trim()) {
+      alert('Content is not available yet.');
+      return;
+    }
+    // Only allow supported types for canvas
+    const allowedTypes = ['article', 'blog', 'white_paper', 'executive_brief', 'socialMedia','conduct-research'];
+    if (!allowedTypes.includes(this.metadata.contentType)) {
+      alert('Canvas is only available for articles, blogs, white papers, executive briefs, social media posts, and conduct research.');
+      return;
+    }
+    // Map socialMedia and conduct-research to an accepted canvas type (they function like articles)
+    let canvasContentType: 'article' | 'blog' | 'white_paper' | 'executive_brief';
+    switch (this.metadata.contentType) {
+      case 'article':
+      case 'blog':
+      case 'white_paper':
+      case 'executive_brief':
+        canvasContentType = this.metadata.contentType;
+        break;
+      case 'socialMedia':
+      case 'conduct-research':
+      default:
+        canvasContentType = 'article';
+        break;
+    }
+    this.canvasStateService.loadFromContent(
+      this.metadata.fullContent,
+      this.metadata.topic || 'Untitled',
+      canvasContentType,
+      this.messageId
     );
   }
 
-  detectDraftIntent(input: string): Observable<{ is_draft_intent: boolean, confidence: number, detected_topic?: string, detected_content_type?: string[] }> {
-    return this.http.post<{ is_draft_intent: boolean, confidence: number, detected_topic?: string, detected_content_type?: string[] }>(
-      `${this.apiUrl}/api/v1/chat/detect-draft-intent`,
-      { input: input.trim() }
-    );
+  toggleExportDropdown(): void {
+    this.showExportDropdown = !this.showExportDropdown;
   }
- 
+  // downloadProcessedFile(): void {
+  //   if (!this.downloadUrl) {
+  //     console.warn('[SlideCreationFlow] No download URL available');
+  //     return;
+  //   }
 
-  sendMessage(messages: Message[], userId?: string, sessionId?: string, threadId?: string, source?: string): Observable<any> {
-    const request: ChatRequest = {
-      messages: messages,
-      stream: false,
-      user_id: userId,
-      session_id: sessionId,
-      thread_id: threadId,
-      source: source || "Chat"
-    };
+  //   const link = document.createElement('a');
+  //   link.href = this.downloadUrl;
+  //   link.target = '_blank';
+  //   link.download = 'Slide.pptx'; // default filename
+  //   link.click();
+  // }
+  exportSelected(format: 'word' | 'pdf' | 'ppt'): void {
+    this.showExportDropdown = false;
+    this.isExporting = true;
+    this.isExported = false;
+    this.exportFormat = format.toUpperCase();
     
-    console.log('[ChatService] sendMessage - URL:', `${this.apiUrl}/api/v1/chat`);
-    console.log('[ChatService] sendMessage - Request:', request);
-    
-    return this.http.post(`${this.apiUrl}/api/v1/chat`, request);
-  }
-
-  createDraft(draftRequest: DraftRequest): Observable<any> {
-    return this.http.post(`${this.apiUrl}/api/draft`, draftRequest);
-  }
-
-  streamChat(messages: Message[], userId?: string, sessionId?: string, threadId?: string, source?: string): Observable<string> {
-    return new Observable(observer => {
-      const request: ChatRequest = {
-        messages: messages,
-        stream: true,
-        user_id: userId,
-        session_id: sessionId,
-        thread_id: threadId,
-        source: source || "Chat"
-      };
-
-      this.authenticatedFetch(`${this.apiUrl}/api/v1/chat`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.content) {
-                      observer.next(parsed.content);
-                    } else if (parsed.done) {
-                      observer.complete();
-                    } else if (parsed.error) {
-                      observer.error(new Error(parsed.error));
-                    }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  streamDraft(draftRequest: DraftRequest): Observable<string> {
-    return new Observable(observer => {
-      this.authenticatedFetch(`${this.apiUrl}/api/draft`, {
-        method: 'POST',
-        body: JSON.stringify(draftRequest)
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.content) {
-                      observer.next(parsed.content);
-                    } else if (parsed.done) {
-                      observer.complete();
-                    } else if (parsed.error) {
-                      observer.error(new Error(parsed.error));
-                    }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  streamThoughtLeadership(tlRequest: ThoughtLeadershipRequest): Observable<string> {
-    return new Observable(observer => {
-      this.authenticatedFetch(`${this.apiUrl}/api/thought-leadership`, {
-        method: 'POST',
-        body: JSON.stringify(tlRequest)
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.content) {
-                      observer.next(parsed.content);
-                    } else if (parsed.done) {
-                      observer.complete();
-                    } else if (parsed.error) {
-                      observer.error(new Error(parsed.error));
-                    }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  improvePPT(originalFile: File, referenceFile: File | null): Observable<Blob> {
-    return new Observable(observer => {
-      const formData = new FormData();
-      formData.append('original_ppt', originalFile);
-      if (referenceFile) {
-        formData.append('reference_ppt', referenceFile);
+    // Check if this is edit content with HTML formatting
+    if (this.isEditContentWithHtml()) {
+      if (format === 'word') {
+        this.exportEditContentToWord();
+      } else if (format === 'pdf') {
+        this.exportEditContentToPDF();
+      } else if (format === 'ppt') {
+        this.downloadPPT();
       }
-
-      this.authenticatedFetchFormData(`${this.apiUrl}/api/v1/ppt/improve`, {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        return response.blob();
-      })
-      .then(blob => {
-        observer.next(blob);
-        observer.complete();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  downloadDdcFormatted(formData: FormData) {
-    // Use HttpClient to get response with headers and blob body
-    // Return an Observable of the full HttpResponse containing the blob
-    return this.http.post(`${this.apiUrl}/api/v1/ddc/brand-format/format-file`, formData, {
-      responseType: 'blob',
-      observe: 'response' as 'body'
-    });
-  }
-
-  streamSanitizationConversation(
-    messages: Message[], 
-    uploadedFileName?: string,
-    clientIdentity?: string,
-    pageRange?: string,
-    tier1Services?: string[],
-    tier2Services?: string[]
-  ): Observable<string> {
-    return new Observable(observer => {
-      const request = {
-        messages: messages,
-        uploaded_file_name: uploadedFileName,
-        client_identity: clientIdentity,
-        page_range: pageRange,
-        tier1_services: tier1Services,
-        tier2_services: tier2Services,
-        stream: true
-      };
-
-      this.authenticatedFetch(`${this.apiUrl}/api/v1/ppt/sanitize/conversation`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.content) {
-                      observer.next(parsed.content);
-                    } else if (parsed.done) {
-                      observer.complete();
-                    } else if (parsed.error) {
-                      observer.error(new Error(parsed.error));
-                    }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  sanitizePPT(file: File, clientName: string, products: string, options?: any): Observable<{blob: Blob, stats: any}> {
-    return new Observable(observer => {
-      const formData = new FormData();
-      formData.append('original_ppt', file);
-      if (clientName) {
-        formData.append('client_name', clientName);
-      }
-      if (products) {
-        formData.append('client_products', products);
-      }
-      if (options) {
-        // Convert camelCase to snake_case for backend
-        const backendOptions = {
-          numeric_data: options.numericData,
-          personal_info: options.personalInfo,
-          financial_data: options.financialData,
-          locations: options.locations,
-          identifiers: options.identifiers,
-          names: options.names,
-          logos: options.logos,
-          metadata: options.metadata,
-          llm_detection: options.llmDetection,
-          hyperlinks: options.hyperlinks,
-          embedded_objects: options.embeddedObjects
-        };
-        formData.append('sanitization_options', JSON.stringify(backendOptions));
-      }
-
-      this.authenticatedFetchFormData(`${this.apiUrl}/api/v1/ppt/sanitize`, {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        const statsHeader = response.headers.get('X-Sanitization-Stats');
-        let stats = null;
-        if (statsHeader) {
-          try {
-            stats = JSON.parse(statsHeader);
-          } catch (e) {
-            console.warn('Could not parse sanitization stats');
-          }
-        }
-        return response.blob().then(blob => ({blob, stats}));
-      })
-      .then(result => {
-        observer.next(result);
-        observer.complete();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  streamDdcWorkflow(workflow: 'brand-format' | 'professional-polish' | 'sanitization' | 'client-customization' | 'rfp-response' | 'ddc-format-translator' | 'slide-creation', formData: FormData): Observable<string> {
-    return this.streamFormData(`${this.apiUrl}/api/v1/ddc/${workflow}`, formData);
-  }
-
-  streamDdcBrandFormat(formData: FormData): Observable<string> {
-    return this.streamDdcWorkflow('brand-format', formData);
-  }
-
-  streamDdcProfessionalPolish(formData: FormData): Observable<string> {
-    return this.streamDdcWorkflow('professional-polish', formData);
-  }
-
-  streamDdcSanitization(formData: FormData): Observable<string> {
-    return this.streamDdcWorkflow('sanitization', formData);
-  }
-
-  streamDdcClientCustomization(formData: FormData): Observable<string> {
-    return this.streamDdcWorkflow('client-customization', formData);
-  }
-
-  streamDdcRfpResponse(formData: FormData): Observable<string> {
-    return this.streamDdcWorkflow('rfp-response', formData);
-  }
-
-  streamDdcFormatTranslator(formData: FormData): Observable<string> {
-    return this.streamDdcWorkflow('ddc-format-translator', formData);
-  }
-
-  streamDdcSlideCreation(formData: FormData): Observable<string> {
-    return this.streamDdcWorkflow('slide-creation', formData);
-  }
-
-  createDdcSlide(formData: FormData): Observable<any> {
-  return this.http.post(`${this.apiUrl}/api/v1/ddc/slide-creation`, formData);
-  }
-
-  private streamFormData(endpoint: string, formData: FormData): Observable<string> {
-    return new Observable(observer => {
-      this.authenticatedFetchFormData(endpoint, {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`Network response was not ok: ${response.status}`);
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.content) {
-                      observer.next(parsed.content);
-                    } else if (parsed.done) {
-                      observer.complete();
-                    } else if (parsed.error) {
-                      observer.error(new Error(parsed.error));
-                    }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  exportDocument(content: string, title: string, format: string): Observable<Blob> {
-    return new Observable(observer => {
-      const endpoint = format === 'pdf' ? '/api/v1/export/pdf-pwc' : '/api/v1/export/word';
-      
-      this.authenticatedFetch(`${this.apiUrl}${endpoint}`, {
-        method: 'POST',
-        body: JSON.stringify({ content, title, format })
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`Export failed: ${response.statusText}`);
-        }
-        return response.blob();
-      })
-      .then(blob => {
-        observer.next(blob);
-        observer.complete();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  streamResearch(researchRequest: any): Observable<string> {
-    return new Observable(observer => {
-      this.authenticatedFetch(`${this.apiUrl}/api/research`, {
-        method: 'POST',
-        body: JSON.stringify(researchRequest)
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.content) {
-                      observer.next(parsed.content);
-                    } else if (parsed.done) {
-                      observer.complete();
-                    } else if (parsed.error) {
-                      observer.error(new Error(parsed.error));
-                    }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  draftArticle(articleData: any, outlineFile?: File, supportingDocs?: File[]): Observable<string> {
-    return new Observable(observer => {
-      const formData = new FormData();
-      formData.append('topic', articleData.topic);
-      formData.append('content_type', articleData.content_type);
-      formData.append('desired_length', articleData.desired_length.toString());
-      formData.append('tone', articleData.tone);
-      
-      if (articleData.outline_text) {
-        formData.append('outline_text', articleData.outline_text);
-      }
-      if (articleData.additional_context) {
-        formData.append('additional_context', articleData.additional_context);
-      }
-      if (outlineFile) {
-        formData.append('outline_file', outlineFile);
-      }
-      if (supportingDocs && supportingDocs.length > 0) {
-        supportingDocs.forEach(doc => {
-          formData.append('supporting_docs', doc);
-        });
-      }
-
-      this.authenticatedFetchFormData(`${this.apiUrl}/api/v1/tl/draft-article`, {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.content) {
-                      observer.next(parsed.content);
-                    } else if (parsed.done) {
-                      observer.complete();
-                    } else if (parsed.error) {
-                      observer.error(new Error(parsed.error));
-                    }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  streamBestPractices(file: File, categories?: string[]): Observable<string> {
-    return new Observable(observer => {
-      const formData = new FormData();
-      formData.append('file', file);
-      if (categories && categories.length > 0) {
-        formData.append('categories', categories.join(','));
-      }
-
-      this.authenticatedFetchFormData(`${this.apiUrl}/api/v1/ppt/validate-best-practices`, {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.content) {
-                      observer.next(parsed.content);
-                    } else if (parsed.done) {
-                      observer.complete();
-                    } else if (parsed.error) {
-                      observer.error(new Error(parsed.error));
-                    }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  generatePodcast(
-    files: File[] | null, 
-    contentText: string | null, 
-    customization: string | null, 
-    podcastStyle: string = 'dialogue',
-    speaker1Name?: string,
-    speaker1Voice?: string,
-    speaker1Accent?: string,
-    speaker2Name?: string,
-    speaker2Voice?: string,
-    speaker2Accent?: string
-  ): Observable<any> {
-    return new Observable(observer => {
-      const formData = new FormData();
-      
-      if (files && files.length > 0) {
-        files.forEach(file => {
-          formData.append('files', file);
-        });
-      }
-      
-      if (contentText) {
-        formData.append('content_text', contentText);
-      }
-      
-      if (customization) {
-        formData.append('customization', customization);
-      }
-      
-      formData.append('podcast_style', podcastStyle);
-      
-      if (speaker1Name) formData.append('speaker1_name', speaker1Name);
-      if (speaker1Voice) formData.append('speaker1_voice', speaker1Voice);
-      if (speaker1Accent) formData.append('speaker1_accent', speaker1Accent);
-      if (speaker2Name) formData.append('speaker2_name', speaker2Name);
-      if (speaker2Voice) formData.append('speaker2_voice', speaker2Voice);
-      if (speaker2Accent) formData.append('speaker2_accent', speaker2Accent);
-
-      this.authenticatedFetchFormData(`${this.apiUrl}/api/v1/tl/generate-podcast`, {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    observer.next(parsed);
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  streamResearchWithMaterials(
-    files: File[] | null,
-    links: string[] | null,
-    query: string,
-    focusAreas: string[],
-    additionalContext: string | null
-  ): Observable<any> {
-    return new Observable(observer => {
-      const formData = new FormData();
-      
-      if (files && files.length > 0) {
-        files.forEach(file => {
-          formData.append('files', file);
-        });
-      }
-      
-      if (links && links.length > 0) {
-        links.forEach(link => {
-          formData.append('links', link);
-        });
-      }
-      
-      formData.append('query', query);
-      
-      if (focusAreas && focusAreas.length > 0) {
-        formData.append('focus_areas', JSON.stringify(focusAreas));
-      }
-      
-      if (additionalContext) {
-        formData.append('additional_context', additionalContext);
-      }
-
-      this.authenticatedFetchFormData(`${this.apiUrl}/api/v1/tl/research-with-materials`, {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    observer.next(parsed);
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  // NEW: Thought Leadership Section Methods (5 Sections)
-
-  streamDraftContent(
-    payload: Message[] | {
-      messages: Message[],
-      content_type?: string,
-      topic?: string,
-      word_limit?: string,
-      audience_tone?: string,
-      outline?: { type: string, content: string },
-      supporting_documents?: { content: string },
-      research?: any,
-      stream: boolean
-    },
-    improvementPrompt?: string,
-    draftParams?: any
-  ): Observable<any> {
-    return new Observable(observer => {
-      let request: any;
-
-      // Check if payload is an array (old format for improvement iterations) or structured object (new format)
-      if (Array.isArray(payload)) {
-        // Old format: Message[] for improvement iterations
-        request = { messages: payload, stream: true };
-        
-        // Add improvement_prompt to request if provided
-        if (improvementPrompt) {
-          request.improvement_prompt = improvementPrompt;
-        }
-        
-        // Add draft parameters for improvement iterations
-        if (draftParams) {
-          if (draftParams.contentType) request.content_type = draftParams.contentType;
-          if (draftParams.topic) request.topic = draftParams.topic;
-          if (draftParams.wordLimit) request.word_limit = draftParams.wordLimit;
-          if (draftParams.audienceTone) request.audience_tone = draftParams.audienceTone;
-          if (draftParams.outlineDoc) request.outline_doc = draftParams.outlineDoc;
-          if (draftParams.supportingDoc) request.supporting_doc = draftParams.supportingDoc;
-          if (draftParams.useFactivaResearch !== undefined) request.use_factiva_research = draftParams.useFactivaResearch;
-        }
+    } else if (format === 'word') {
+      if (this.metadata?.contentType === 'conduct-research') {
+        this.exportWordNewLogic();   
       } else {
-        // New format: Structured payload object with all fields
-        request = payload;
+        this.downloadWord();       
       }
-
-      this.authenticatedFetch(`${this.apiUrl}/api/v1/tl/draft-content`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      })
-      .then(response => {
-        if (!response.ok) throw new Error('Network response was not ok');
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    observer.next(JSON.parse(data));
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => observer.error(error));
-    });
+    } else if(format === 'pdf') {
+      this.downloadPDF();
+    } else if (format === 'ppt') {
+      this.downloadPPT();
+    }
   }
 
-  // streamConductResearch(messages: Message[], sourceGroups?: string[]): Observable<any> {
-  streamConductResearch(formData: FormData): Observable<any> {  
-  return new Observable(observer => {
-      // const request: any = { messages, stream: true };
-      // if (sourceGroups && sourceGroups.length > 0) {
-      //   request.source_groups = sourceGroups;
-      // }
+  /**
+   * Check if this is edit content message with HTML formatting
+   */
+  private isEditContentWithHtml(): boolean {
+    // Must be the final revised article from Quick Start Edit Content
+    const isFinalEditContent =
+      this.metadata?.topic === 'Final Revised Article' &&
+      this.metadata?.contentType === 'article';
 
-      this.authenticatedFetchFormData(`${this.apiUrl}/api/v1/tl/conduct-research`, {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => {
-        if (!response.ok) throw new Error('Network response was not ok');
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+    if (!isFinalEditContent) {
+      return false;
+    }
 
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
+    if (!this.message?.content) {
+      return false;
+    }
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    observer.next(JSON.parse(data));
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => observer.error(error));
-    });
+    const content = this.message.content;
+    // Check for HTML formatting from formatFinalArticleWithBlockTypes
+    // Look for our known wrapper and styled elements
+    return content.includes('revised-content-formatted') ||
+           content.includes('<h1 style') || 
+           content.includes('<h2 style') ||
+           content.includes('<p style') ||
+           content.includes('<ul style');
   }
 
-  /** Stream edit content workflow with specified editor types */
-  streamEditContent(
-    messages: Message[], 
-    editorTypes?: string[], 
-    temperature: number = 0,
-    maxTokens: number = 32000
-  ): Observable<any> {
-    if (temperature < 0 || temperature > 2) {
-      console.warn(`[ChatService] Temperature ${temperature} is outside valid range (0.0-2.0), using default 0`);
-      temperature = 0;
+  /**
+   * Extract HTML content and block types from edit content message
+   */
+  private getEditContentData(): { htmlContent: string; plainText: string; blockTypes: BlockTypeInfo[]; title: string } | null {
+    if (!this.isEditContentWithHtml() || !this.message) {
+      return null;
+    }
+
+    let htmlContent = this.message.content;
+    
+    // Remove wrapper divs to get clean HTML content
+    // The message content structure: <div class="result-section"><div class="assistant-message revised-content-formatted">HEADER + FORMATTED_CONTENT</div></div>
+    // We want to extract just the formatted content (after the header)
+    
+    // First, try to extract from revised-content-formatted div
+    let revisedMatch = htmlContent.match(/<div[^>]*class="[^"]*revised-content-formatted[^"]*"[^>]*>(.*?)<\/div>/s);
+    if (revisedMatch) {
+      htmlContent = revisedMatch[1];
     }
     
-    if (maxTokens < 1000 || maxTokens > 128000) {
-      console.warn(`[ChatService] maxTokens ${maxTokens} is outside valid range (1000-128000), using default 32000`);
-      maxTokens = 32000;
+    // If still wrapped, try result-section wrapper
+    if (htmlContent.includes('result-section')) {
+      const resultMatch = htmlContent.match(/<div[^>]*class="[^"]*result-section[^"]*"[^>]*>(.*?)<\/div>/s);
+      if (resultMatch) {
+        htmlContent = resultMatch[1];
+        // Extract revised-content-formatted again
+        revisedMatch = htmlContent.match(/<div[^>]*class="[^"]*revised-content-formatted[^"]*"[^>]*>(.*?)<\/div>/s);
+        if (revisedMatch) {
+          htmlContent = revisedMatch[1];
+        }
+      }
     }
     
-    return new Observable(observer => {
-      const request: any = { 
-        messages, 
-        stream: true,
-        editor_types: editorTypes || [],
-        temperature: temperature,
-        max_tokens: maxTokens
-      };
-// streamEditContent(messages: Message[], editorTypes?: string[], temperature: number = 0.0): Observable<any> {
-//     return new Observable(observer => {
-//       const request = { 
-//         messages, 
-//         stream: true,
-//         editor_types: editorTypes || [],
-//         temperature: temperature
-//       };
-
-      this.authenticatedFetch(`${this.apiUrl}/api/v1/tl/edit-content`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      })
-      .then(response => {
-        if (!response.ok) throw new Error('Network response was not ok');
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    observer.next(JSON.parse(data));
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => observer.error(error));
-    });
+    // Remove header markdown (Quick Start Thought Leadership header)
+    // The header is converted to HTML, look for h3 tags with "Quick Start"
+    htmlContent = htmlContent.replace(/<h3[^>]*>.*?Quick Start.*?<\/h3>.*?/is, '');
+    htmlContent = htmlContent.replace(/<p[^>]*>.*?Source:.*?<\/p>.*?/is, '');
+    
+    // Clean up any remaining wrapper tags
+    htmlContent = htmlContent.trim();
+    
+    // Extract plain text for fallback
+    const plainText = htmlContent.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '');
+    
+    // Extract title from HTML or use metadata topic
+    const title = extractDocumentTitle(plainText) || this.metadata.topic || 'Revised Article';
+    
+    // Extract block types from HTML structure
+    const blockTypes: BlockTypeInfo[] = this.extractBlockTypesFromHtml(htmlContent);
+    
+    return { htmlContent, plainText, blockTypes, title };
   }
 
-  // Accept either an array of messages OR a structured payload { messages, original_content, services, stream }
-  streamRefineContent(payload: Message[] | { messages: Message[]; original_content?: string; services?: any[]; stream?: boolean }): Observable<any> {
-    return new Observable(observer => {
-      const request = Array.isArray(payload)
-        ? { messages: payload, stream: true }
-        : { messages: payload.messages || [], original_content: (payload as any).original_content, services: (payload as any).services, stream: (payload as any).stream ?? true };
-
-      this.authenticatedFetch(`${this.apiUrl}/api/v1/tl/refine-content`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      })
-      .then(response => {
-        if (!response.ok) throw new Error('Network response was not ok');
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    observer.next(JSON.parse(data));
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => observer.error(error));
-    });
-  }
-
-  streamFormatTranslator(params: {
-    content: string;
-    uploadedFile: File;
-    sourceFormat: string;
-    targetFormat: string;
-    customization?: string;
-    podcastStyle?: string;
-    speaker1Name?: string;
-    speaker1Voice?: string;
-    speaker1Accent?: string;
-    speaker2Name?: string;
-    speaker2Voice?: string;
-    speaker2Accent?: string;
-    wordLimit?: string;
-  }): Observable<any> {
-    return new Observable(observer => {
-      const formData = new FormData();
-      formData.append('content', params.content);
-      formData.append('source_format', params.sourceFormat);
-      formData.append('target_format', params.targetFormat);
-      formData.append('uploadedFile', params.uploadedFile, params.uploadedFile.name);
+  /**
+   * Extract block types from HTML structure
+   * Matches the structure created by formatFinalArticleWithBlockTypes
+   */
+  private extractBlockTypesFromHtml(html: string): BlockTypeInfo[] {
+    const blockTypes: BlockTypeInfo[] = [];
+    
+    // Remove wrapper divs to get to the actual content
+    let contentHtml = html;
+    const wrapperMatch = contentHtml.match(/<div[^>]*class="[^"]*revised-content-formatted[^"]*"[^>]*>(.*?)<\/div>/s);
+    if (wrapperMatch) {
+      contentHtml = wrapperMatch[1];
+    }
+    
+    // Split by block-level elements (h1-h6, p, ul, ol)
+    // Use regex to match opening tags and their content
+    const blockRegex = /<(h[1-6]|p|ul|ol)[^>]*>(.*?)<\/\1>/gs;
+    let match;
+    let index = 0;
+    
+    while ((match = blockRegex.exec(contentHtml)) !== null) {
+      const tagName = match[1].toLowerCase();
+      const content = match[2];
       
-      if (params.customization) formData.append('customization', params.customization);
-      if (params.podcastStyle) formData.append('podcast_style', params.podcastStyle);
-      if (params.speaker1Name !== undefined) formData.append('speaker1_name', params.speaker1Name);
-      if (params.speaker1Voice !== undefined) formData.append('speaker1_voice', params.speaker1Voice);
-      if (params.speaker1Accent !== undefined) formData.append('speaker1_accent', params.speaker1Accent);
-      if (params.speaker2Name !== undefined) formData.append('speaker2_name', params.speaker2Name);
-      if (params.speaker2Voice !== undefined) formData.append('speaker2_voice', params.speaker2Voice);
-      if (params.speaker2Accent !== undefined) formData.append('speaker2_accent', params.speaker2Accent);
-      if (params.wordLimit) formData.append('word_limit', params.wordLimit);
-
-      console.log('[ChatService] Format Translator Request:', {
-        sourceFormat: params.sourceFormat,
-        targetFormat: params.targetFormat,
-        hasSpeaker1: !!params.speaker1Name,
-        hasSpeaker2: !!params.speaker2Name
-      });
-
-      this.authenticatedFetchFormData(`${this.apiUrl}/api/v1/tl/format-translator`, {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => {
-        if (!response.ok) {
-          console.error('[ChatService] Format translator response not OK:', response.status, response.statusText);
-          throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      if (tagName === 'h1') {
+        // Check if it has title styling (font-weight: 700)
+        if (match[0].includes('font-weight: 700') || match[0].includes('margin-top: 1.25em')) {
+          blockTypes.push({ index, type: 'title', level: 0 });
+        } else {
+          blockTypes.push({ index, type: 'heading', level: 1 });
         }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        console.log(response.body)
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-            console.log(buffer)
-
-            if(buffer.includes("placemat"))
-            {
-              const parsed = JSON.parse(buffer);
-               observer.next({ type: 'placemat', content: buffer, url:parsed.download_url, status:parsed.status});
-
-            }
-           
-
-            lines.forEach(line => {
-              console.log(lines)
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                console.log(data)
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    console.log('[ChatService] Format Translator SSE data:', parsed);
-                    observer.next(parsed);
-                  } catch (e) {
-                    console.error('[ChatService] Error parsing SSE data:', e, 'Raw data:', data);
-                    // If parsing fails, try to send as string content
-                    observer.next({ type: 'content', content: data });
-                  }
-                }
-                
-                  
-              }
-            });
-
-            return readStream();
-          });
+        index++;
+      } else if (tagName.startsWith('h') && tagName.length === 2) {
+        const level = parseInt(tagName.substring(1)) || 1;
+        blockTypes.push({ index, type: 'heading', level });
+        index++;
+      } else if (tagName === 'ul' || tagName === 'ol') {
+        // Count list items
+        const liMatches = content.match(/<li[^>]*>/g);
+        const itemCount = liMatches ? liMatches.length : 0;
+        for (let i = 0; i < itemCount; i++) {
+          blockTypes.push({ index, type: 'bullet_item', level: 0 });
+          index++;
         }
-
-        return readStream();
-      })
-      .catch(error => observer.error(error));
-    });
-  }
-
-  streamSectionUpdate(request: UpdateSectionRequest): Observable<string> {
-    return new Observable(observer => {
-      this.authenticatedFetch(`${this.apiUrl}/api/v1/tl/update-section`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        function readStream(): any {
-          return reader?.read().then(({ done, value }) => {
-            if (done) {
-              observer.complete();
-              return;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data) {
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.content) {
-                      observer.next(parsed.content);
-                    } else if (parsed.done) {
-                      observer.complete();
-                    } else if (parsed.error) {
-                      observer.error(new Error(parsed.error));
-                    }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, 'Data:', data);
-                  }
-                }
-              }
-            });
-
-            return readStream();
-          });
-        }
-
-        return readStream();
-      })
-      .catch(error => {
-        observer.error(error);
-      });
-    });
-  }
-
-  exportToWord(data: { content: string; title: string }): Observable<Blob> {
-    return this.http.post(`${this.apiUrl}/api/v1/export/word`, data, {
-      responseType: 'blob'
-    });
-  }
-
-  exportToPDF(data: { content: string; title: string }): Observable<Blob> {
-    return this.http.post(`${this.apiUrl}/api/v1/export/pdf-pwc`, data, {
-      responseType: 'blob'
-    });
-  }
-
-  exportToText(data: { content: string; title: string }): Observable<Blob> {
-    return this.http.post(`${this.apiUrl}/api/v1/export/text`, data, {
-      responseType: 'blob'
-    });
-  }
-
-  // ===== Chat History Management Methods =====
-  // These methods manage chat history retrieval from database (lazy loading)
-
-  /**
-   * Get all chat session summaries for a user.
-   * Returns only titles and metadata, NOT full conversations.
-   * @param userId User email or identifier
-   * @param source Optional source filter (Chat, DDDC, Thought_Leadership, etc.)
-   * @returns List of session summaries
-   */
-  getUserSessions(userId: string, source?: string): Observable<ChatSessionSummary[]> {
-    let url = `${this.apiUrl}/api/v1/chat-history/sessions?user_id=${encodeURIComponent(userId)}`;
-    if (source) {
-      url += `&source=${encodeURIComponent(source)}`;
+      } else if (tagName === 'p') {
+        blockTypes.push({ index, type: 'paragraph', level: 0 });
+        index++;
+      }
     }
-    return this.http.get<ChatSessionSummary[]>(url);
+    
+    // If no blocks found, try simpler parsing
+    if (blockTypes.length === 0) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(contentHtml, 'text/html');
+      const body = doc.body;
+      
+      for (let i = 0; i < body.children.length; i++) {
+        const element = body.children[i];
+        const tagName = element.tagName.toLowerCase();
+        
+        if (tagName === 'h1') {
+          blockTypes.push({ index, type: 'title', level: 0 });
+          index++;
+        } else if (tagName.startsWith('h') && tagName.length === 2) {
+          const level = parseInt(tagName.substring(1)) || 1;
+          blockTypes.push({ index, type: 'heading', level });
+          index++;
+        } else if (tagName === 'ul' || tagName === 'ol') {
+          const items = element.querySelectorAll('li');
+          items.forEach(() => {
+            blockTypes.push({ index, type: 'bullet_item', level: 0 });
+            index++;
+          });
+        } else if (tagName === 'p') {
+          blockTypes.push({ index, type: 'paragraph', level: 0 });
+          index++;
+        }
+      }
+    }
+    
+    return blockTypes;
   }
 
   /**
-   * Get full conversation for a specific session.
-   * Call this only when user clicks on a session to load the conversation.
-   * @param sessionId Session identifier
-   * @returns Complete session data with conversation messages
+   * Export edit content to Word using new endpoint
    */
-  getSessionConversation(sessionId: string): Observable<ChatSessionDetail> {
-    return this.http.get<ChatSessionDetail>(
-      `${this.apiUrl}/api/v1/chat-history/sessions/${encodeURIComponent(sessionId)}`
-    );
-  }
+  private exportEditContentToWord(): void {
+    const editData = this.getEditContentData();
+    if (!editData) {
+      this.downloadWord(); // Fallback to regular export
+      return;
+    }
 
-  /**
-   * Delete a chat session (soft delete).
-   * @param sessionId Session identifier
-   * @returns Deletion confirmation
-   */
-  deleteSession(sessionId: string): Observable<any> {
-    return this.http.delete(
-      `${this.apiUrl}/api/v1/chat-history/sessions/${encodeURIComponent(sessionId)}`
-    );
-  }
-  exportWordStandalone(payload: {
-  content: string;
-  title: string;
-  content_type?: string;
-}): Observable<Blob> {
-  return this.http.post(
-    `${this.apiUrl}/api/v1/export/word-standalone`,
-    payload,
-    { responseType: 'blob' }
-  );
-}
-
-exportPdfStandalone(payload: {
-  content: string;
-  title: string;
-}): Observable<Blob> {
-  return this.http.post(
-    `${this.apiUrl}/api/v1/export/pdf-pwc`,
-    payload,
-    { responseType: 'blob' }
-  );
-}
-
-  /**
-   * Export edit content to Word document with HTML formatting and block types
-   * @param payload Object containing content, title, htmlContent, and blockTypes
-   * @returns Observable of Blob containing Word document
-   */
-  exportEditContentToWord(payload: {
-    content: string;
-    title: string;
-    htmlContent: string;
-    blockTypes?: Array<{index: number; type: string; level?: number}>;
-  }): Observable<Blob> {
-    return this.http.post(
-      `${this.apiUrl}/api/v1/export/edit-content/word`,
-      {
-        content: payload.content,
-        title: payload.title,
-        html_content: payload.htmlContent,
-        block_types: payload.blockTypes || []
+    this.chatService.exportEditContentToWord({
+      content: editData.plainText,
+      title: editData.title,
+      htmlContent: editData.htmlContent,
+      blockTypes: editData.blockTypes
+    }).subscribe({
+      next: (blob: Blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        const safeTitle = this.sanitizeFilename(editData.title);
+        link.download = `${safeTitle}.docx`;
+        link.click();
+        window.URL.revokeObjectURL(url);
+        this.resetExportState();
       },
-      { responseType: 'blob' }
-    );
+      error: (error) => {
+        console.error('Edit content Word export error:', error);
+        alert('Failed to generate Word document. Please try again.');
+        this.isExporting = false;
+      }
+    });
   }
 
   /**
-   * Export edit content to PDF document with HTML formatting and block types
-   * @param payload Object containing content, title, htmlContent, and blockTypes
-   * @returns Observable of Blob containing PDF document
+   * Export edit content to PDF using new endpoint
    */
-  exportEditContentToPDF(payload: {
-    content: string;
-    title: string;
-    htmlContent: string;
-    blockTypes?: Array<{index: number; type: string; level?: number}>;
-  }): Observable<Blob> {
-    return this.http.post(
-      `${this.apiUrl}/api/v1/export/edit-content/pdf-pwc`,
-      {
-        content: payload.content,
-        title: payload.title,
-        html_content: payload.htmlContent,
-        block_types: payload.blockTypes || []
+  private exportEditContentToPDF(): void {
+    const editData = this.getEditContentData();
+    if (!editData) {
+      this.downloadPDF(); // Fallback to regular export
+      return;
+    }
+
+    this.chatService.exportEditContentToPDF({
+      content: editData.plainText,
+      title: editData.title,
+      htmlContent: editData.htmlContent,
+      blockTypes: editData.blockTypes
+    }).subscribe({
+      next: (blob: Blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        const safeTitle = this.sanitizeFilename(editData.title);
+        link.download = `${safeTitle}.pdf`;
+        link.click();
+        window.URL.revokeObjectURL(url);
+        this.resetExportState();
       },
-      { responseType: 'blob' }
-    );
+      error: (error) => {
+        console.error('Edit content PDF export error:', error);
+        alert('Failed to generate PDF document. Please try again.');
+        this.isExporting = false;
+      }
+    });
   }
+
+  private resetExportState(): void {
+    setTimeout(() => {
+      this.isExporting = false;
+    }, 500);
+    
+    this.isExported = true;
+    // Reset success indicator after 3 seconds
+    setTimeout(() => {
+      this.isExported = false;
+    }, 3000);
+  }
+
+  private exportDocument(endpoint: string, extension: string, format: string): void {
+    // Reuse the same approach as EditContentFlowComponent.downloadRevised()
+    if (!this.metadata.fullContent || !this.metadata.fullContent.trim()) {
+      alert('Content is not available yet.');
+      return;
+    }
+
+    // Clean content the same way as the working implementation
+    const plainText = this.metadata.fullContent.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '');
+    
+    // Extract first line as subtitle (title for download)
+    const lines = plainText.split('\n').filter(line => line.trim());
+    const subtitle = lines.length > 0 ? lines[0].substring(0, 150) : 'Generated Document'; // First line as title, max 150 chars
+    const title = subtitle; // Use subtitle as the main title, not the topic
+    
+    console.log(`>>>>>>>>>>>>>`,plainText);
+
+    // Get API URL from environment (supports runtime config via window._env)
+    const apiUrl = (window as any)._env?.apiUrl || environment.apiUrl || '';
+    const fullEndpoint = `${apiUrl}${endpoint}`;
+
+    // Use fetch API like the working implementation (same as EditContentFlowComponent.downloadRevised)
+    this.authFetchService.authenticatedFetch(fullEndpoint, {
+      method: 'POST',
+      body: JSON.stringify({
+        content: plainText,
+        title,
+        subtitle: '',  // Don't pass subtitle separately since title is already set to it
+        contentType: this.metadata.contentType  // Add contentType to payload
+      })
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`Failed to generate ${extension.toUpperCase()} document`);
+      }
+      return response.blob();
+    })
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${this.sanitizeFilename(title)}.${extension}`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      this.resetExportState();
+    })
+    .catch(error => {
+      console.error(`Error generating ${extension.toUpperCase()}:`, error);
+      alert(`Failed to generate ${extension.toUpperCase()} file. Please try again.`);
+      this.isExporting = false;
+    });
+  }
+  private exportPPT(endpoint: string): void {
+  if (!this.metadata.fullContent || !this.metadata.fullContent.trim()) {
+    alert('Content is not available yet.');
+    return;
+  }
+
+  const plainText = this.metadata.fullContent
+    .replace(/<br>/g, '\n')
+    .replace(/<[^>]+>/g, '');
+
+  const title = this.metadata.topic?.trim() || 'Generated Presentation';
+
+  const apiUrl = (window as any)._env?.apiUrl || environment.apiUrl || '';
+  const fullEndpoint = `${apiUrl}${endpoint}`;
+
+  this.authFetchService.authenticatedFetch(fullEndpoint, {
+    method: 'POST',
+    body: JSON.stringify({
+      content: plainText,
+      title
+    })
+  })
+  .then(response => {
+    if (!response.ok) throw new Error("Failed to start PPT generation");
+    return response.json(); 
+  })
+  .then(data => {
+    console.log("PPT download URL:", data.download_url);
+
+    const downloadUrl = data.download_url;
+    if (!downloadUrl) throw new Error("No download URL returned");
+
+    return fetch(downloadUrl, {
+      method: "GET",
+      headers: {
+        "Accept": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+      }
+    });
+  })
+  .then(response => {
+    if (!response.ok) throw new Error("Failed to retrieve PPT file");
+    return response.blob();
+  })
+  .then(blob => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${this.sanitizeFilename(title)}.pptx`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+    this.resetExportState();
+  })
+  .catch(err => {
+    console.error(err);
+    alert("Failed to generate PPT file.");
+    this.isExporting = false;
+  });
 }
 
+
+  private downloadFile(extension: string, mimeType: string): void {
+    const blob = new Blob([this.metadata.fullContent], { type: mimeType });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${this.sanitizeFilename(this.metadata.topic)}.${extension}`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  }
+
+  private sanitizeFilename(filename: string): string {
+    return filename.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  }
+
+  get isPodcast(): boolean {
+    const result = this.metadata.contentType === 'podcast' && !!this.metadata.podcastAudioUrl;
+    console.log('[TL Action Buttons] isPodcast check:', {
+      contentType: this.metadata.contentType,
+      hasPodcastUrl: !!this.metadata.podcastAudioUrl,
+      podcastUrl: this.metadata.podcastAudioUrl?.substring(0, 50),
+      result: result
+    });
+    return result;
+  }
+  
+  convertToPodcast(): void {
+    if (this.isConvertingToPodcast) return;
+    
+    this.isConvertingToPodcast = true;
+    
+    // Prepare the podcast generation request with correct backend schema
+    const formData = new FormData();
+    formData.append('topic', this.metadata.topic); // Required field
+    formData.append('style', 'dialogue'); // dialogue or monologue
+    formData.append('duration', 'medium'); // short, medium, or long
+    formData.append('context', this.metadata.fullContent); // The content to convert
+    
+    let scriptContent = '';
+    let audioBase64 = '';
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    
+    // Get API URL from environment (supports runtime config via window._env)
+    const apiUrl = (window as any)._env?.apiUrl || environment.apiUrl || '';
+    
+    // Use fetch for SSE streaming
+    this.authFetchService.authenticatedFetchFormData(`${apiUrl}/api/v1/tl/generate-podcast`, {
+      method: 'POST',
+      body: formData
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      
+      const readStream = (): any => {
+        return reader?.read().then(({ done, value }) => {
+          if (done) {
+            this.isConvertingToPodcast = false;
+            
+            console.log('[Podcast Debug] Stream complete');
+            console.log('[Podcast Debug] audioBase64 length:', audioBase64?.length || 0);
+            console.log('[Podcast Debug] scriptContent length:', scriptContent?.length || 0);
+            
+            // Send podcast to chat with metadata
+            if (audioBase64 && scriptContent) {
+              console.log('[Podcast Debug] Converting base64 to blob...');
+              const audioBlob = this.base64ToBlob(audioBase64, 'audio/mpeg');
+              console.log('[Podcast Debug] Blob size:', audioBlob.size, 'bytes');
+              
+              const audioUrl = URL.createObjectURL(audioBlob);
+              console.log('[Podcast Debug] Audio URL created:', audioUrl);
+              
+              // Create metadata for the podcast message
+              const podcastMetadata: ThoughtLeadershipMetadata = {
+                contentType: 'podcast',
+                topic: `${this.metadata.topic} (Podcast)`,
+                fullContent: scriptContent,
+                showActions: true,
+                podcastAudioUrl: audioUrl,
+                podcastFilename: `${this.sanitizeFilename(this.metadata.topic)}_podcast.mp3`
+              };
+              
+              console.log('[Podcast Debug] Metadata:', podcastMetadata);
+              
+              // Send to chat via bridge
+              const podcastMessage = `📻 **Podcast Generated Successfully!**\n\n**Script:**\n\n${scriptContent}\n\n🎧 **Audio Ready!** Listen below or download the MP3 file.`;
+              this.tlChatBridge.sendToChat(podcastMessage, podcastMetadata);
+              
+              console.log('[Podcast Debug] Sent to chat via bridge');
+              alert('Podcast generated and added to chat!');
+            } else {
+              console.error('[Podcast Debug] Missing data - audioBase64:', !!audioBase64, 'scriptContent:', !!scriptContent);
+            }
+            return;
+          }
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          lines.forEach(line => {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6).trim();
+              if (data) {
+                try {
+                  const parsed = JSON.parse(data);
+                  console.log('[Podcast Debug] SSE event type:', parsed.type);
+                  
+                  if (parsed.type === 'script') {
+                    scriptContent = parsed.content;
+                    console.log('[Podcast Debug] Script received, length:', scriptContent.length);
+                  } else if (parsed.type === 'complete') {
+                    audioBase64 = parsed.audio;
+                    console.log('[Podcast Debug] Audio received, base64 length:', audioBase64?.length || 0);
+                  } else if (parsed.type === 'error') {
+                    console.error('Podcast generation error:', parsed.message);
+                    alert(`Error generating podcast: ${parsed.message}`);
+                    
+                    // Abort the reader and reset state immediately
+                    reader?.cancel();
+                    this.isConvertingToPodcast = false;
+                    throw new Error(parsed.message);
+                  } else if (parsed.type === 'progress') {
+                    console.log('[Podcast Debug] Progress:', parsed.message);
+                  }
+                } catch (e) {
+                  console.error('Error parsing SSE data:', e);
+                }
+              }
+            }
+          });
+          
+          return readStream();
+        }).catch((error) => {
+          // Handle stream reading errors
+          this.isConvertingToPodcast = false;
+          reader?.cancel();
+          throw error;
+        });
+      };
+      
+      return readStream();
+    })
+    .catch(error => {
+      console.error('Error converting to podcast:', error);
+      alert(`Failed to convert content to podcast: ${error.message || 'Unknown error'}`);
+      this.isConvertingToPodcast = false;
+      reader?.cancel();
+    });
+  }
+  
+  private base64ToBlob(base64: string, contentType: string): Blob {
+    const byteCharacters = atob(base64);
+    const byteArrays = [];
+    
+    for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+      const slice = byteCharacters.slice(offset, offset + 512);
+      const byteNumbers = new Array(slice.length);
+      for (let i = 0; i < slice.length; i++) {
+        byteNumbers[i] = slice.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      byteArrays.push(byteArray);
+    }
+    
+    return new Blob(byteArrays, { type: contentType });
+  }
+
+ 
+}
