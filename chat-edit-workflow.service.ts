@@ -1,77 +1,231 @@
-[
-    {
-        "isSelected": false,
-        "type": "compress",
-        "original_word_count": 767,
-        "expected_word_count": 767
-    },
-    {
-        "isSelected": false,
-        "type": "adjust_audience_tone"
-    },
-    {
-        "isSelected": false,
-        "type": "improvement_suggestions",
-        "suggestion_type": "general"
-    },
-    {
-        "isSelected": true,
-        "type": "enhanced_with_research",
-        "research_topics": "AI in finance",
-        "word_limit": "1000",
-        "research_guidelines": "focus on agentic systems",
-        "pwc_content": {
-            "isSelected": true,
-            "supportingDoc": "The integration of Artificial Intelligence (AI) into financial services represents a developmental shift in the industry, presenting unprecedented opportunities and challenges. This scientometric review examines the evolution of AI in finance from 1989 to 2024, analyzing its pivotal applications in credit scoring, fraud detection, digital insurance, robo-advisory services, and financial inclusion. The analysis reveals significant trends, particularly the growing adoption of machine learning, natural language processing, and blockchain technologies in reshaping financial operations and decision-making processes. The review addresses critical regulatory and ethical challenges, emphasizing the imperative for explainable AI (XAI) and robust governance frameworks to ensure transparency, fairness, and accountability in AI-driven systems. Despite rapid advancements, persistent gaps remain, the most notable of which is the lack of standardized frameworks for AI implementation across financial sectors. The findings support the need for a balanced approach that promotes innovation while addressing ethical, regulatory, and societal concerns. This comprehensive synthesis maps the trajectory of AI in finance, identifies key areas for future research, and recommends interdisciplinary collaboration to advance responsible and sustainable AI integration within the financial ecosystem.\nSimilar content being viewed by others\nFinance centralization—research on enterprise intelligence\nArticle Open access13 November 2024\nAI reshaping financial modeling\nArticle Open access01 October 2025\nRevolutionizing finance with conversational AI: a focus on ChatGPT implementation and challenges\nArticle Open access19 March 2025\nIntroduction\nArtificial Intelligence (AI) has emerged as a disruptive force in modern finance and has almost completely overhauled how operations are carried out in the industry (Tao et al., 2021). AI, which typically involves technologies such as machine learning, deep learning, and natural language processing, now dictates the mediums for financial functions. Its impact cuts across a wide range of applications—from algorithmic trading and fraud detection to customer service chatbots and robo-advisors (Ranković et al., 2023).\nThis rise in adoption is also evident in the projected doubling of financial institutions’ AI expenditure, expected to reach $97 billion by 2027 (Kearns, 2023). With an estimated compound annual growth rate (CAGR) of 29.6%, the financial sector is now the fastest-growing industry globally in terms of AI investment (La Croce, 2023). This exponential growth has prompted leading financial firms such as JPMorgan and Morgan Stanley Wealth Management to establish their AI infrastructures, recognizing the technology’s transformative potential (Kearns, 2023). However, this transformative potential presents a paradox: while AI is capable of driving breakthrough performances, it also harbors systemic risks that depends primarily on how it is regulated and ethically deployed (Ahern, 2021; Arner et al., 2020; Berdiyeva et al., 2021).\nRecent developments in advanced AI models, such as ChatGPT and DeepSeek, reinforce the argument for the immense benefits that can be derived from AI technologies; however, their cross-border and pervasive nature also introduces novel risks that demand careful scrutiny to prevent potential widespread crises (Bahoo et al., 2024). One such critical risk is the issue of human oversight. Effective oversight requires that human decision-makers possess the ability to interpret and evaluate AI-generated outputs, to accept, reject, or modify AI recommendations based on ethical, legal, and practical considerations (Černevičienė & Kabašinskas, 2024). This ensures that ultimate responsibility remains with human operators, who can intervene to mitigate adverse outcomes and align AI applications with ethical standards. Such oversight not only ensures accountability but also enhances the responsible use of AI technologies, guarding against risks while fostering trust in AI-driven financial systems (Max et al., 2021).\nAs AI in finance continues through its adoption and growth phase, it is expected that its full benefits and potential threats will become more apparent over time. This dynamic has spurred a significant surge in AI finance publications in recent years, as researchers strive to address literature gaps and identify emerging trajectories to advance the field (Goodell et al., 2023). Over the past two decades, the volume of publications has risen considerably, from an annual average of 29 to 178 articles, based on our dataset. These studies explore a wide range of topics, including optimal financial models, associated risks, and diverse applications across various facets of finance.\nSince the early 1990s, when scientific research on AI in finance first emerged, numerous technologies have been adopted, redefined or replaced in response to the evolving needs of financial markets. Concurrently, the terminology and focus of research have shifted to mirror this changing landscape (Leone & de Medeiros, 2015). For researchers and finance professionals, understanding both foundational and niche themes in AI is crucial to developing technologies and research that align with current trends and dynamics. Against this backdrop, this study examines trends in AI finance research to identify key stakeholders, influential topics, and areas that are prime for further exploration to provide a structured analysis of research gaps and development trajectories.\nMajor research gaps remain in the literature, particularly in understanding the evolving regulatory landscape and ethical considerations surrounding AI-based finance (Brummer and Gorfine). The fast pace of AI application adoption demands that current regulatory frameworks and ethical dilemmas are critically examined, including issues of algorithmic bias and fairness (Friedler et al., 2019). Addressing these issues is essential to ensuring the responsible development and deployment of AI technologies in finance and protecting the interests of both financial institutions and consumers (Pithadia, 2021).\nRegulators face considerable challenges in understanding the underlying mechanisms of complex AI systems, complicating their efforts to establish effective oversight. Similarly, consumers struggle to decipher the reasoning behind AI-generated outputs in their decision-making process. These challenges led to the emergence of Explainable Artificial Intelligence (XAI), which prioritizes transparency and interpretability in AI models (Chen et al., 2023). Moreover, the rapid pace of AI technology advancements implies that regulatory frameworks are continuously updated, which imposes substantial costs on regulatory bodies. Other regulatory challenges include ambiguous regulations (Arner, 2019), data privacy and security concerns (Lopez & Alcaide, 2020), and the lack of global regulatory harmonization (Erdélyi & Goldsmith, 2018) —factors that collectively threaten the effective and ethical use of AI in finance. The 2008 financial crisis—triggered by lax oversight, complex financial products and inadequate risk assessment—serve as a stark reminder of the consequences of regulatory failures (Vukovic et al., 2019; Gorton & Metrick, 2012). The 2010 Flash Crash also further exemplifies the risks posed by inadequately regulated AI-driven systems in causing sudden and severe market disruptions (Frömmel, 2022).\nThis study addresses these critical gaps through a comprehensive literature review, employing a scientometric approach to analyze the existing body of research on AI in finance. The primary objectives are twofold: (1) to identify prevailing research trends and prospects in AI finance, and (2) to investigate the applications, regulatory frameworks, and ethical considerations associated with AI in finance. The scientometric methodology provides a robust, objective framework for analyzing trends and identifying gaps in AI-based finance research. Through this approach, the study makes several novel contributions to literature. First, it employs a larger and more recent dataset to provide an up-to-date perspective on AI in finance developments. Second, it analyzes evolving trends in AI techniques, offering insights into the field’s technological progression, influential contributors, and potential areas for research (Bahoo et al., 2024). Third, by examining regulatory frameworks and ethical considerations, the study provides a guiding framework for responsible AI integration in finance. These insights are crucial for promoting innovative financial technology, robust governance standards and enhancing trust in AI-driven financial systems.\nThe next parts of this paper are structured as follows: Section 2 reviews the relevant literature, to provide a foundation for understanding the key themes and developments. Section 3 outlines the research methodology to describe the data sources and analytical approaches employed in this study. Section 4 presents the main findings, combining scientometric and content analyses to reveal trends and patterns in AI finance research. Section 5 delves into the regulation of AI in finance, synthesizing critical studies and highlighting key gaps. Finally, Section 6 concludes the paper by discussing the implications of the findings and proposing avenues for future research.\nLiterature background\nArtificial intelligence in finance: evolution, impact, and regulatory perspectives\nEarly literature conceptualized AI primarily as a tool for automation. However, with the introduction of advanced algorithms and computational models, AI has evolved into a more comprehensive tool in recent studies (Johnson et al., 2019; Arslanian & Fischer, 2019). This evolution has resulted in the development of several theoretical frameworks for understanding AI’s role in finance. The mechanistic viewpoint focuses on AI’s capacity for automating routine tasks through rule-based systems to streamline operational efficiency within financial institutions. In contrast, the predictive analytics viewpoint highlights AI’s ability to support market analysis and decision-making, particularly through machine learning applications (Wang et al., 2021). These divergent conceptualizations demonstrate AI’s complexity and its varied applications across different financial domains.\nThe technological foundation underlying AI financial applications has evolved through distinct phases, each marked by significant advances in computing power, data availability, and algorithmic sophistication (Arner et al., 2020). Contemporary AI systems in finance are distinguished by their ability to process and analyze vast datasets in real-time, leveraging multiple technological components that work in concert. Machine learning models extract patterns from historical data, while natural language processing (NLP) algorithms decode unstructured textual information. Neural networks, designed to mimic human cognitive processes, enable these systems to handle increasingly complex analytical tasks (Zhang et al., 2021). This technological convergence has enabled AI to transcend its initial role in basic process automation and emerge as a sophisticated tool for financial analysis and decision-making.\nThe historical trajectory of AI in finance demonstrates how technological advancement has fundamentally altered financial services delivery and operations. The evolution progressed from basic rule-based automation systems in the initial stages to increasingly sophisticated applications incorporating predictive analytics and machine learning (Johnson et al., 2019). This change was more than just technical; it represented a vital shift in how financial institutions approached data analysis, risk assessment, and decision-making processes. The progression from automated task execution to complex predictive modeling shows the technology’s expanding capabilities and its growing strategic significance in financial operations.\nContemporary developments in AI finance are marked by several interconnected trends that are reshaping industry practices. Natural Language Processing (NLP) and sentiment analysis are used to understand textual data, enabling financial institutions to gauge market sentiment and make informed investment decisions (Gao et al., 2021). Explainable AI (XAI) has gained prominence as a critical factor in ensuring regulatory compliance and building user trust by making AI algorithms more interpretable (Chen et al., 2023). Robotic Process Automation (RPA) is streamlining back-office operations, reducing costs, and improving efficiency (Madakam et al., 2019). Additionally, AI-driven chatbots and virtual assistants are enhancing customer interactions by providing personalized services and resolving queries more efficiently (Iovine et al., 2023). Algorithmic trading, powered by AI, is optimizing investment strategies, offering greater precision and speed in executing trades (Arner, 2019). These trends collectively reflect the integration of different AI applications to improve the financial sector.\nLooking ahead, the financial industry is set to be influenced by a number of new developments in AI. For instance, quantum computing promises to deliver unmatched computational power for complex financial modeling and optimization (Woerner & Egger, 2019). AI-based fraud detection systems are evolving through advanced anomaly detection algorithms to enhance security and mitigate risks (El Hajj & Hammoud, 2023). Continuous advancements in neural networks and deep learning are expanding AI’s ability to analyze unstructured data, such as images and audio, for applications in fraud prevention and customer service. Augmented Intelligence, which emphasizes collaboration between humans and AI, is gaining traction as a decision-support tool in complex financial scenarios (Tao et al., 2021). Furthermore, the integration of blockchain and AI is paving the way for decentralized, transparent, and secure solutions, particularly in areas such as smart contracts and digital identity (Kshetri, 2021). These emerging trends highlight the ongoing evolution of AI in finance, pointing to a future where its influence will be more pervasive and transformative.\nThese developments of AI in finance have also been extensively studied through bibliometric approaches. Seminal works by Chen et al. (2023), Tao et al. (2021), Goodell et al. (2021), and Ahmed et al. (2022) have explored the foundational elements, thematic underpinnings, and research clusters in AI literature. These studies employ techniques such as co-citation analysis, bibliometric coupling, NLP-based bibliometric approaches, and integrated CiteSpace analysis to uncover evolving research trends in AI-based finance. Chen et al. (2023), for instance, focus on Explainable AI (XAI) in finance, noting a significant increase in publications since 2013. Their research notes a transition from traditional finance research toward more inclusive and diversified applications, accompanied by improvements in non-interpretable models and a growing emphasis on risk and ethical considerations. Other studies also identify three principal literature clusters within AI finance: (1) portfolio construction, computation, and investor behavior; (2) financial fraud and distress; and (3) sentiment inference, forecasting, and planning. These clusters show the major applications of AI in finance (Goodell et al., 2021). Ahmed et al. (2022) observe a surge in literature on Machine Learning (ML) and AI finance, with the United States, China, and the United Kingdom emerging as the top contributors. This global distribution of research highlights the international significance and interest in AI applications within finance, and the leading role these countries play in its exploration and development.\nThe global perspectives, however, vary on how AI is regulated. Efforts to address ethical concerns, regulatory gaps, and privacy issues related to AI applications have revealed divergent views across different regions, with limited literature available to quantitatively or qualitatively determine the best approaches (Lee, 2020). The European Banking Institute advocates for robust and centralized governance to address risks and regulatory fragmentation, particularly in cross-border FinTech trade, while the United States has adopted a more decentralized approach that raises concerns about standardization and harmonization (Azzutti et al., 2022; Ahern, 2021). The issue of regulatory arbitrage has also emerged from this disconnect, with AI platforms for tokenization, crowdfunding and cryptocurrencies being at the forefront of providing unfair advantages to some users. Explainable AI (XAI) has been proposed to help regulators access sufficient information for better-informed regulations. Regulatory Technology (RegTech) is also emerging as a potential solution to streamline AI compliance, while regulatory sandboxes are facilitating innovation and testing in controlled environments (Boukherouaa et al., 2021; Lee, 2020). Nevertheless, measuring the performance of AI regulation remains challenging due to the lack of standardized metrics. Current trends suggest a shift toward risk-oriented regulatory approaches that prioritizes flexibility and adaptability in governing AI in finance. As the financial industry continues to embrace AI, the literature on AI regulation is expected to evolve, offering new insights into the ongoing transformation of the financial landscape and addressing the critical balance between innovation and ethics. This study aims to explore this dynamic, laying the groundwork for future research, policy discussions, and AI development in finance. By doing so, it seeks to make a pioneering contribution to the field.",
-            "supportingDoc_instructions": "focus on first 3 modules in the document",
-            "research_links": "http://localhost:8080/docs#/Chat/chat_api_v1_chat_post"
-        },
-        "proprietary": {
-            "isSelected": true,
-            "sources": [
-                "PwC Industry Edge",
-                "PwC Insights",
-                "s+b Journal",
-                "Executive Leadership Hub",
-                "The Exchange",
-                "PwC Connected Source",
-                "PwC Benchmarking",
-                "Insights Factory",
-                "PwC Intelligence",
-                "Client Success Stories",
-                "Inside Industries",
-                "Value Store"
-            ]
-        },
-        "thirdParty": {
-            "isSelected": true,
-            "sources": [
-                "Factiva",
-                "S&P Global- Capital IQ Xpressfeed",
-                "S&P Global- Connect",
-                "BoardEx",
-                "Audit Analytics",
-                "S&P Global- SNL Insurance",
-                "Claritas",
-                "Equifax",
-                "Equifax IXI",
-                "Definitive Healthcare Provider Database",
-                "Sg2 Health Care Intelligence",
-                "Strata Market Insights",
-                "Global Data(Retail)",
-                "Technology Business Review",
-                "IBIS World",
-                "CFRA Industry Surveys"
-            ]
-        },
-        "externalResearch": {
-            "isSelected": true,
-            "research_links": "http://localhost:8080/docs#/Chat/chat_api_v1_chat_post"
-        }
-    },
-    {
-        "isSelected": false,
-        "type": "edit_content",
-        "editors": []
-    }
-]
+"""
+Proprietary Source Tools
+Each tool represents a separate PwC proprietary source.
+Tool names match exactly with the source names from user selection.
+"""
+
+from langchain_core.tools import tool
+from typing import Dict, List
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@tool(name="PwC Industry Edge")
+def search_pwc_industry_edge(query: str, guidelines: str = "") -> str:
+    """Search PwC Industry Edge for industry-specific insights and data.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from PwC Industry Edge
+    """
+    logger.info(f"[Tool: PwC Industry Edge] Query: {query}, Guidelines: {guidelines}")
+    # TODO: Implement actual API call to PwC Industry Edge
+    return f"Research data from PwC Industry Edge for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="PwC Insights")
+def search_pwc_insights(query: str, guidelines: str = "") -> str:
+    """Search PwC Insights for research content.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from PwC Insights
+    """
+    logger.info(f"[Tool: PwC Insights] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from PwC Insights for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="s+b Journal")
+def search_sb_journal(query: str, guidelines: str = "") -> str:
+    """Search s+b Journal for articles and insights.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from s+b Journal
+    """
+    logger.info(f"[Tool: s+b Journal] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from s+b Journal for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="Executive Leadership Hub")
+def search_executive_leadership_hub(query: str, guidelines: str = "") -> str:
+    """Search Executive Leadership Hub for leadership insights.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from Executive Leadership Hub
+    """
+    logger.info(f"[Tool: Executive Leadership Hub] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from Executive Leadership Hub for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="The Exchange")
+def search_the_exchange(query: str, guidelines: str = "") -> str:
+    """Search The Exchange for content.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from The Exchange
+    """
+    logger.info(f"[Tool: The Exchange] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from The Exchange for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="PwC Connected Source")
+def search_pwc_connected_source(query: str, guidelines: str = "") -> str:
+    """Search PwC Connected Source for knowledge base content.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from PwC Connected Source
+    """
+    logger.info(f"[Tool: PwC Connected Source] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from PwC Connected Source for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="PwC Benchmarking")
+def search_pwc_benchmarking(query: str, guidelines: str = "") -> str:
+    """Search PwC Benchmarking for benchmarking data.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from PwC Benchmarking
+    """
+    logger.info(f"[Tool: PwC Benchmarking] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from PwC Benchmarking for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="Insights Factory")
+def search_insights_factory(query: str, guidelines: str = "") -> str:
+    """Search Insights Factory for insights.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from Insights Factory
+    """
+    logger.info(f"[Tool: Insights Factory] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from Insights Factory for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="PwC Intelligence")
+def search_pwc_intelligence(query: str, guidelines: str = "") -> str:
+    """Search PwC Intelligence for intelligence data.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from PwC Intelligence
+    """
+    logger.info(f"[Tool: PwC Intelligence] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from PwC Intelligence for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="Client Success Stories")
+def search_client_success_stories(query: str, guidelines: str = "") -> str:
+    """Search Client Success Stories for case studies.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from Client Success Stories
+    """
+    logger.info(f"[Tool: Client Success Stories] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from Client Success Stories for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="Inside Industries")
+def search_inside_industries(query: str, guidelines: str = "") -> str:
+    """Search Inside Industries for industry-specific content.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from Inside Industries
+    """
+    logger.info(f"[Tool: Inside Industries] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from Inside Industries for: {query}\nGuidelines: {guidelines}"
+
+
+@tool(name="Value Store")
+def search_value_store(query: str, guidelines: str = "") -> str:
+    """Search Value Store for content.
+    
+    Args:
+        query: Research topic or query
+        guidelines: Additional research guidelines
+        
+    Returns:
+        Research data from Value Store
+    """
+    logger.info(f"[Tool: Value Store] Query: {query}, Guidelines: {guidelines}")
+    return f"Research data from Value Store for: {query}\nGuidelines: {guidelines}"
+
+
+# Mapping of source names (exact match from user selection) to tool functions
+PROPRIETARY_TOOLS_MAP = {
+    "PwC Industry Edge": search_pwc_industry_edge,
+    "PwC Insights": search_pwc_insights,
+    "s+b Journal": search_sb_journal,
+    "Executive Leadership Hub": search_executive_leadership_hub,
+    "The Exchange": search_the_exchange,
+    "PwC Connected Source": search_pwc_connected_source,
+    "PwC Benchmarking": search_pwc_benchmarking,
+    "Insights Factory": search_insights_factory,
+    "PwC Intelligence": search_pwc_intelligence,
+    "Client Success Stories": search_client_success_stories,
+    "Inside Industries": search_inside_industries,
+    "Value Store": search_value_store,
+}
+
+
+def get_proprietary_tools_for_sources(selected_sources: List[str]):
+    """
+    Get LangChain tool objects for selected sources only.
+    
+    Args:
+        selected_sources: List of source names selected by user (exact match required)
+        
+    Returns:
+        List of LangChain tool objects
+    """
+    tools = []
+    for source_name in selected_sources:
+        tool_func = PROPRIETARY_TOOLS_MAP.get(source_name)
+        if tool_func:
+            tools.append(tool_func)
+            logger.info(f"[Tools] Added tool for source: {source_name}")
+        else:
+            logger.warning(f"[Tools] Tool not found for source: {source_name}")
+    return tools
+
