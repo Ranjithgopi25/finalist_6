@@ -1,922 +1,432 @@
-import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core';
+import os
+from typing import Dict, List, Callable, Annotated
+from pydantic import BaseModel, Field
 
-import { ChatService, TlChatBridgeService, ChatEditWorkflowService, ChatDraftWorkflowService, ChatSessionSummary, ChatSessionDetail } from '../../core/services';
-import { AuthService } from '../../auth/auth.service';
-import { TlFlowService } from '../../core/services/tl-flow.service';
-import { DdcFlowService } from '../../core/services/ddc-flow.service';
-import { Message, ChatSession } from '../../core/models';
-import { JourneyType, TL_WORKFLOWS, DDC_WORKFLOWS, WorkflowCard } from '../../core/models/guided-journey.models';
-import { MessageListComponent } from './components/message-list/message-list.component';
-import { ChatInputComponent } from './components/chat-input/chat-input.component';
-import { ChatHistorySidebarComponent } from './components/chat-history-sidebar/chat-history-sidebar.component';
-import { WelcomeScreenComponent, QuickAction } from './components/welcome-screen/welcome-screen.component';
-import { GuidedDialogComponent } from '../../shared/components/guided-dialog/guided-dialog.component';
-import { DraftContentFlowComponent } from '../thought-leadership/draft-content-flow/draft-content-flow.component';
-import { ConductResearchFlowComponent } from '../thought-leadership/conduct-research-flow/conduct-research-flow.component';
-import { EditContentFlowComponent } from '../thought-leadership/edit-content-flow/edit-content-flow.component';
-import { RefineContentFlowComponent } from '../thought-leadership/refine-content-flow/refine-content-flow.component';
-import { FormatTranslatorFlowComponent } from '../thought-leadership/format-translator-flow/format-translator-flow.component';
-import { BrandFormatFlowComponent } from '../ddc/brand-format-flow/brand-format-flow.component';
-import { ProfessionalPolishFlowComponent } from '../ddc/professional-polish/professional-polish-flow.component';
-import { SanitizationFlowComponent } from '../ddc/sanitization/sanitization-flow.component';
-import { ClientCustomizationFlowComponent } from '../ddc/client-customization/client-customization-flow.component';
-import { RfpResponseFlowComponent } from '../ddc/rfp-response/rfp-response-flow.component';
-import { FormatTranslatorFlowComponent as DdcFormatTranslatorFlowComponent } from '../ddc/format-translator/format-translator-flow.component';
-import { SlideCreationFlowComponent } from '../ddc/slide-creation/slide-creation-flow.component';
-import { Subject, Observable } from 'rxjs';
-import { takeUntil, filter } from 'rxjs/operators';
+from langgraph.graph import StateGraph, END
+from langchain_core.messages import SystemMessage, HumanMessage
+from fastapi.encoders import jsonable_encoder
 
-@Component({
-  selector: 'app-chat',
-  standalone: true,
-  imports: [
-    MessageListComponent,
-    ChatInputComponent,
-    ChatHistorySidebarComponent,
-    WelcomeScreenComponent,
-    GuidedDialogComponent,
-    DraftContentFlowComponent,
-    ConductResearchFlowComponent,
-    EditContentFlowComponent,
-    RefineContentFlowComponent,
-    FormatTranslatorFlowComponent,
-    BrandFormatFlowComponent,
-    ProfessionalPolishFlowComponent,
-    SanitizationFlowComponent,
-    ClientCustomizationFlowComponent,
-    RfpResponseFlowComponent,
-    DdcFormatTranslatorFlowComponent,
-    SlideCreationFlowComponent
-],
-  templateUrl: './chat.component.html',
-  styleUrls: ['./chat.component.scss']
-})
-export class ChatComponent implements OnInit, OnDestroy {
-  @ViewChild(MessageListComponent) messageList?: MessageListComponent;
-  @ViewChild(ChatInputComponent) chatInput?: ChatInputComponent;
+from tavily import TavilyClient
+from app.core.deps import get_llm_client_agent
+from .tools import PROPRIETARY_TOOLS_MAP
+import logging
 
-  messages: Message[] = [];
-  userInput: string = '';
-  isLoading: boolean = false;
-  uploadedFile: File | null = null;
-  
-  // Chat history
-  currentSessionId: string | null = null;
-  savedSessions: ChatSession[] = [];
-  showHistoryPanel: boolean = false;
-  searchQuery: string = '';
-  
-  // Database chat history tracking
-  private userId: string = 'anonymous@example.com'; // TODO: Get from auth service
-  private dbSessionId: string = '';
-  private dbThreadId: string | null = null;
-  
-  // Database-driven chat history (new)
-  dbChatSessions: ChatSession[] = []; // Changed to ChatSession[] for compatibility
-  isLoadingDbSessions: boolean = false;
-  isLoadingDbConversation: boolean = false;
-  selectedSourceFilter: string = ''; // NEW: Source filter for chat history
-  
-  // Guided dialogs
-  showGuidedDialog: boolean = false;
-  currentJourney: JourneyType | null = null;
-  currentWorkflows: WorkflowCard[] = [];
-  
-  private readonly STORAGE_KEY = 'pwc_chat_sessions';
-  private readonly MAX_SESSIONS = 20;
-  private destroy$ = new Subject<void>();
-  private currentStreamingSubscription: any = null;
+logger = logging.getLogger(__name__)
 
-  quickActions: QuickAction[] = [
-    {
-      title: 'Draft Presentation',
-      description: 'AI-powered slide outline generation with PwC best practices',
-      icon: 'draft',
-      action: 'draft_ppt'
-    },
-    {
-      title: 'Improve Formatting',
-      description: 'Fix spelling, grammar, alignment, and color branding',
-      icon: 'improve',
-      action: 'improve_ppt'
-    },
-    {
-      title: 'Sanitize Document',
-      description: 'Remove client data with tier-based workflow',
-      icon: 'sanitize',
-      action: 'sanitize_ppt'
-    },
-    {
-      title: 'Validate Best Practices',
-      description: 'Check against PwC consulting standards',
-      icon: 'validate',
-      action: 'validate_ppt'
-    }
-  ];
 
-  constructor(
-    private chatService: ChatService,
-    private authService: AuthService,
-    private tlChatBridge: TlChatBridgeService,
-    private tlFlowService: TlFlowService,
-    private ddcFlowService: DdcFlowService,
-    public editWorkflowService: ChatEditWorkflowService,
-    public draftWorkflowService: ChatDraftWorkflowService
-  ) {
-    console.log('[ChatComponent] Constructor called');
-    console.log('[ChatComponent] TlChatBridge service:', this.tlChatBridge);
-  }
+# =========================================================
+# 1. CLIENTS
+# =========================================================
 
-  ngOnInit(): void {
-    console.log('[ChatComponent] ngOnInit called - v1.1');
-    console.log('[ChatComponent] EditWorkflowService injected:', this.editWorkflowService);
-    
-    // Initialize database session ID for chat history tracking
-    this.dbSessionId = `session-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    console.log('[ChatComponent] Initialized database session:', this.dbSessionId);
-    
-    this.loadSessions();
-    
-    // Wait for authentication to complete before loading database sessions
-    this.authService.getLoginStatus()
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((status) => {
-        console.log('[ChatComponent] Login status:', status);
-        
-        // When not in the middle of interaction, try to get user info
-        if (status === 'None' || !status) {
-          // Get actual logged-in user email from auth service
-          const userInfo = this.authService.getUserInfo();
-          if (userInfo && userInfo.email) {
-            this.userId = userInfo.email;
-            console.log('[ChatComponent] ✅ Set userId from AuthService:', this.userId);
-            // Now load database sessions with correct user
-            this.loadDbSessions();
-          } else {
-            console.warn('[ChatComponent] ⚠️ Could not get user email from AuthService, using fallback');
-            this.userId = 'anonymous@example.com';
-            // Still try to load (might have mock data)
-            this.loadDbSessions();
-          }
-        }
-      });
-    
-    this.initializeChat();
-    this.subscribeToThoughtLeadership();
-    this.subscribeToEditWorkflow();
-    this.subscribeToDraftWorkflow();
-  }
+llm = get_llm_client_agent()
+# tavily = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
 
-  ngOnDestroy(): void {
-    // Cleanup streaming subscription
-    if (this.currentStreamingSubscription) {
-      this.currentStreamingSubscription.unsubscribe();
-      this.currentStreamingSubscription = null;
-    }
-    
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 
-  private subscribeToThoughtLeadership(): void {
-    console.log('[ChatComponent] Subscribing to Thought Leadership messages');
-    console.log('[ChatComponent] message$ observable:', this.tlChatBridge.message$);
-    
-    this.tlChatBridge.message$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (message) => {
-          console.log('[ChatComponent] Received TL message:', message);
-          console.log('[ChatComponent] Current messages count before push:', this.messages.length);
-          this.messages.push(message);
-          console.log('[ChatComponent] Current messages count after push:', this.messages.length);
-          this.saveCurrentSession();
-          setTimeout(() => {
-            this.messageList?.triggerScrollToBottom();
-          }, 100);
-        },
-        error: (err) => {
-          console.error('[ChatComponent] Error in TL subscription:', err);
-        },
-        complete: () => {
-          console.log('[ChatComponent] TL subscription completed');
-        }
-      });
-    
-    console.log('[ChatComponent] Subscription setup complete');
-  }
+# =========================================================
+# 2. MODELS
+# =========================================================
 
-  private subscribeToEditWorkflow(): void {
-    console.log('[ChatComponent] Subscribing to Edit Workflow messages');
-    
-    this.editWorkflowService.message$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (workflowMessage) => {
-          console.log('[ChatComponent] Received Edit Workflow message:', workflowMessage);
-          this.messages.push(workflowMessage.message);
-          this.saveCurrentSession();
-          this.isLoading=false;
-          setTimeout(() => {
-            this.messageList?.triggerScrollToBottom();
-          }, 100);
-        },
-        error: (err) => {
-          console.error('[ChatComponent] Error in Edit Workflow subscription:', err);
-        }
-      });
-    
-    // Subscribe to workflow completion to clear state
-    this.editWorkflowService.workflowCompleted$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          console.log('[ChatComponent] Workflow completed - clearing state');
-          this.userInput = '';
-          this.uploadedFile = null;
-          // Clear file input element in chat input component
-          if (this.chatInput) {
-            this.chatInput.clearFileInput();
-          }
-          // Notify message list to reset file upload components
-          if (this.messageList) {
-            this.messageList.resetFileUploads();
-          }
-        }
-      });
-    
-    console.log('[ChatComponent] Edit Workflow subscription setup complete');
-  }
+class ResearchSignals(BaseModel):
+    facts: List[str] = Field(default_factory=list)
+    statistics: List[str] = Field(default_factory=list)
+    trends: List[str] = Field(default_factory=list)
+    risks: List[str] = Field(default_factory=list)
+    opportunities: List[str] = Field(default_factory=list)
+    citations: List[str] = Field(default_factory=list)
 
-  private subscribeToDraftWorkflow(): void {
-    console.log('[ChatComponent] Subscribing to Draft Workflow messages');
 
-    this.draftWorkflowService.message$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (workflowMessage) => {
-          console.log('[ChatComponent] Received Draft Workflow message:', workflowMessage);
-          this.messages.push(workflowMessage.message);
-          this.saveCurrentSession();
-          setTimeout(() => {
-            this.messageList?.triggerScrollToBottom();
-          }, 100);
-        },
-        error: (err) => {
-          console.error('[ChatComponent] Error in Draft Workflow subscription:', err);
-        }
-      });
+def merge_tool_results(
+    left: Dict[str, Dict[str, ResearchSignals]],
+    right: Dict[str, Dict[str, ResearchSignals]],
+) -> Dict[str, Dict[str, ResearchSignals]]:
+    merged = dict(left)
+    for area, tools in right.items():
+        merged.setdefault(area, {})
+        merged[area].update(tools)
+    return merged
 
-    this.draftWorkflowService.workflowCompleted$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          console.log('[ChatComponent] Draft Workflow completed - clearing state');
-          this.userInput = '';
-        }
-      });
-  }
 
-  initializeChat(): void {
-    if (this.messages.length === 0) {
-      this.messages.push({
-        role: 'assistant',
-        content: 'Hello! I\'m your MCX AI assistant. How can I help you today?',
-        timestamp: new Date()
-      });
-    }
-  }
+class GraphState(BaseModel):
+    input: dict
 
-  async sendMessage(): Promise<void> {
-    if ((!this.userInput.trim() && !this.uploadedFile) || this.isLoading) {
-      return;
-    }
+    tool_results: Annotated[
+        Dict[str, Dict[str, ResearchSignals]],
+        merge_tool_results
+    ] = Field(default_factory=dict)
 
-    const input = this.userInput.trim();
-    const fileToUpload = this.uploadedFile;
-    const userMessage: Message = {
-      role: 'user',
-      content: input,
-      timestamp: new Date()
-    };
 
-    this.messages.push(userMessage);
-    this.userInput = '';
-    
-    this.messageList?.triggerScrollToBottom();
+# =========================================================
+# 3. SYSTEM PROMPT
+# =========================================================
 
-    // CHECK IF USER IS RESPONDING TO DRAFT SATISFACTION QUESTION - MUST BE FIRST!
-    // This is the HIGHEST PRIORITY - must never reach edit intent if awaiting feedback
-    const isAwaitingFeedback = this.tlChatBridge.isAwaitingDraftFeedback();
-    const draftContext = this.tlChatBridge.getDraftContext();
-    console.log('[ChatComponent] PRIORITY CHECK - isAwaitingDraftFeedback:', isAwaitingFeedback);
-    console.log('[ChatComponent] PRIORITY CHECK - draftContext:', draftContext);
-    console.log('[ChatComponent] PRIORITY CHECK - User input:', input);
-    
-    if (isAwaitingFeedback) {
-      console.log('[ChatComponent] *** HANDLING DRAFT FEEDBACK - Input: "' + input + '" ***');
-      console.log('[ChatComponent] Draft context available:', draftContext);
-      const satisfactionResult = this.analyzeDraftSatisfactionResponse(input);
-      console.log('[ChatComponent] Satisfaction analysis result:', satisfactionResult);
-      
-      if (satisfactionResult.isPositive) {
-        // User is satisfied with the draft
-        console.log('[ChatComponent] ✓ User SATISFIED with draft - ending draft flow');
-        const acknowledgment: Message = {
-          role: 'assistant',
-          content: 'Great! I\'m glad you\'re satisfied with the content. You can now use it in your documents or make further edits as needed.',
-          timestamp: new Date()
-        };
-        this.messages.push(acknowledgment);
-        this.tlChatBridge.clearDraftContext();
-        console.log('[ChatComponent] Context cleared after satisfaction');
-        this.messageList?.triggerScrollToBottom();
-        this.saveCurrentSession();
-        return;
-      } else if (satisfactionResult.hasImprovementRequest) {
-        // User wants improvements
-        console.log('[ChatComponent] ✗ User wants IMPROVEMENTS - Input:', satisfactionResult.improvementText);
-        const draftContext = this.tlChatBridge.getDraftContext();
-        console.log('[ChatComponent] Draft context available:', !!draftContext);
-        
-        if (draftContext) {
-          console.log('[ChatComponent] Processing improvement request with context');
-          this.isLoading = true;
-          
-          // Create improvement message for the backend
-          const improvementMessage = `${input}`;
-          
-          const assistantMessage: Message = {
-            role: 'assistant',
-            content: '',
-            timestamp: new Date(),
-            isStreaming: true
-          };
-          this.messages.push(assistantMessage);
-          
-          // Call the draft improvement endpoint
-          const messages: Message[] = [{
-            role: 'user' as const,
-            content: improvementMessage,
-            timestamp: new Date()
-          }];
-          
-          const draftParams = {
-            contentType: draftContext.contentType,
-            topic: draftContext.topic,
-            wordLimit: draftContext.wordLimit,
-            audienceTone: draftContext.audienceTone,
-            outlineDoc: draftContext.outlineDoc,
-            supportingDoc: draftContext.supportingDoc,
-            useFactivaResearch: draftContext.useFactivaResearch
-          };
+SYSTEM_PROMPT = """
+You are a market intelligence research agent.
 
-          this.chatService.streamDraftContent(messages, improvementMessage, draftParams).subscribe({
-            next: (chunk: any) => {
-              if (typeof chunk === 'string') {
-                assistantMessage.content += chunk;
-              } else if (chunk && chunk.type === 'content' && chunk.content) {
-                assistantMessage.content += chunk.content;
-              }
-              this.messageList?.triggerScrollToBottom();
-            },
-            error: (error) => {
-              console.error('[ChatComponent] Error processing draft improvement:', error);
-              assistantMessage.isStreaming = false;
-              assistantMessage.content = 'I apologize, but I encountered an error while processing your improvement request. Please try again.';
-              this.isLoading = false;
-              this.tlChatBridge.clearDraftContext();
-            },
-            complete: () => {
-              console.log('[ChatComponent] Improvement streaming complete');
-              assistantMessage.isStreaming = false;
-              this.isLoading = false;
-              
-              // Ask for satisfaction again
-              if (assistantMessage.content && assistantMessage.content.trim()) {
-                const newSatisfactionMessage: Message = {
-                  role: 'system',
-                  content: 'Are you satisfied with this revised content? If not, let me know what else needs to be improved.',
-                  timestamp: new Date()
-                };
-                this.messages.push(newSatisfactionMessage);
-                
-                // Update draft context with new content
-                draftContext.generatedContent = assistantMessage.content;
-                this.tlChatBridge.setDraftContext(draftContext);
-                console.log('[ChatComponent] Context updated with new content, still awaiting feedback');
-              }
-              
-              this.saveCurrentSession();
-              this.messageList?.triggerScrollToBottom();
+TASK:
+Extract STRUCTURED market intelligence signals.
+
+RULES:
+- Output MUST follow the schema exactly
+- No prose or explanations
+- Best-effort, factual, professional intelligence
+"""
+
+
+# =========================================================
+# 4. LLM CALL
+# =========================================================
+
+def call_llm(prompt: str) -> ResearchSignals:
+    structured_llm = llm.with_structured_output(ResearchSignals)
+    return structured_llm.invoke(
+        [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=prompt),
+        ]
+    )
+
+
+# =========================================================
+# 5. PROMPT BUILDERS
+# =========================================================
+
+def pwc_document_prompt(input_data: dict) -> str:
+    pwc = input_data["pwc_content"]
+    return f"""
+Analyze the following internal document and extract market intelligence.
+
+DOCUMENT:
+{pwc["supportingDoc"]}
+
+INSTRUCTIONS:
+{pwc.get("supportingDoc_instructions", "")}
+"""
+
+
+def generic_tool_prompt(tool_name: str, input_data: dict) -> str:
+    return f"""
+SOURCE: {tool_name}
+TOPIC: {input_data.get("research_topics")}
+GUIDELINES: {input_data.get("research_guidelines")}
+"""
+
+
+# =========================================================
+# 6. GENERIC TOOL NODE (LLM-ONLY)
+# =========================================================
+
+def make_llm_tool_node(
+    area: str,
+    tool_name: str,
+    prompt_builder: Callable[[dict], str],
+):
+    def node(state: GraphState) -> dict:
+        signals = call_llm(prompt_builder(state.input))
+        return {
+            "tool_results": {
+                area: {
+                    tool_name: signals
+                }
             }
-          });
-          
-          // EXIT EARLY - don't process as edit intent or other workflows!
-          console.log('[ChatComponent] Returning from draft improvement flow');
-          return;
-        } else {
-          console.warn('[ChatComponent] Draft context not found, clearing and continuing');
-          this.tlChatBridge.clearDraftContext();
-          return;
         }
-      }
-      
-      // If we get here, clear the draft context and continue to normal chat
-      console.log('[ChatComponent] Unclear satisfaction response, clearing draft context');
-      this.tlChatBridge.clearDraftContext();
-      return;
-    }
+
+    return node
+
+
+# =========================================================
+# 7. PROPRIETARY AGENT NODE
+# =========================================================
+
+def proprietary_agent_node(state: GraphState) -> dict:
+    """
+    Proprietary agent node that:
+    1. Parses research_topics, research_guidelines, and proprietary.sources from input
+    2. Directly calls tools for each selected source (like tavily_tool_node)
+    3. Converts tool results to ResearchSignals format
+    4. Returns results in format that graph.py will merge automatically
+    """
+    # Parse input
+    research_topics = state.input.get("research_topics", "")
+    research_guidelines = state.input.get("research_guidelines", "")
     
-    // If we reach here, we are NOT awaiting draft feedback - safe to check other intents
-    console.log('[ChatComponent] NOT awaiting draft feedback - proceeding to check other intents');
-
-    // Handle Edit Content workflow integration
-    // BUT: Don't even check edit intent if we're awaiting draft feedback!
-    if (this.tlChatBridge.isAwaitingDraftFeedback()) {
-      console.log('[ChatComponent] Still awaiting draft feedback, preventing edit intent check');
-      // This shouldn't happen if draft check executed properly, but safety check
-      return;
-    }
+    # Get proprietary configuration
+    proprietary_config = state.input.get("proprietary", {})
+    is_selected = proprietary_config.get("isSelected", False)
     
-    const workflowActive = this.editWorkflowService.isActive;
-    const hasEditIntent = await this.editWorkflowService.detectEditIntent(input);
-    
-    if (workflowActive || hasEditIntent || (fileToUpload && workflowActive)) {
-      // Use the workflow service's handleChatInput method
-      this.editWorkflowService.handleChatInput(input, fileToUpload || undefined);
-      this.uploadedFile = null;
-      return;
-    }
-
-    // Handle Draft Content workflow integration
-    const draftWorkflowActive = this.draftWorkflowService.isActive;
-    if (draftWorkflowActive) {
-      this.draftWorkflowService.handleChatInput(input);
-      return;
-    }
-
-    // Check for intents if no workflow is active
-    if (!workflowActive && !draftWorkflowActive) {
-      // Check for Rewrite Intent first (before calling backend detection)
-      if (this.isRewriteIntent(input)) {
-        console.log('[ChatComponent] Rewrite intent detected, delegating to draft workflow service');
-        // Add user message to chat first
-        const userMessage: Message = {
-          role: 'user',
-          content: input,
-          timestamp: new Date()
-        };
-        this.messages.push(userMessage);
-        this.userInput = '';
-        this.messageList?.triggerScrollToBottom();
-        this.saveCurrentSession();
-        
-        this.draftWorkflowService.handleChatInput(input);
-        return;
-      }
-
-      // Check for Edit Intent
-      const editIntent = await this.editWorkflowService.detectEditIntent(input);
-      if (editIntent.hasEditIntent) {
-        if (editIntent.detectedEditors && editIntent.detectedEditors.length > 0) {
-          this.editWorkflowService.beginWorkflowWithEditors(editIntent.detectedEditors);
-        } else {
-          this.editWorkflowService.beginWorkflow();
+    if not is_selected:
+        logger.info("[Proprietary Agent] isSelected is False, skipping")
+        return {
+            "tool_results": {
+                "proprietary": {}
+            }
         }
-        return;
-      }
-
-      // Check for Draft Intent
-
-      const draftIntent = await this.draftWorkflowService.detectDraftIntent(input);
-      console.log('[ChatComponent] Draft intent detected:', draftIntent);
-      console.log('[ChatComponent] Content type array:', draftIntent.detectedContentType, 'Length:', draftIntent.detectedContentType?.length);
-      
-      if (draftIntent.hasDraftIntent) {
-        console.log('[ChatComponent] Starting conversational quick draft with topic:', draftIntent.detectedTopic, 'contentType:', draftIntent.detectedContentType?.[0]);
-        
-        // Add user message to chat first
-        const userMessage: Message = {
-          role: 'user',
-          content: input,
-          timestamp: new Date()
-        };
-        this.messages.push(userMessage);
-        this.userInput = '';
-        this.messageList?.triggerScrollToBottom();
-        this.saveCurrentSession();
-        
-        // If content type is missing, use beginWorkflow to start full input flow
-        if (!draftIntent.detectedContentType || draftIntent.detectedContentType.length === 0) {
-          console.log('[ChatComponent] Content type missing, starting full workflow with topic:', draftIntent.detectedTopic);
-          this.draftWorkflowService.beginWorkflow(draftIntent.detectedTopic || '', '', draftIntent.wordLimit, draftIntent.audienceTone);
-        } else {
-          console.log('[ChatComponent] Content type found, using startQuickDraftConversation');
-          // Start conversational flow with detected values
-          const topic = draftIntent.detectedTopic || 'the given topic';
-          const contentType = this.formatContentType(draftIntent.detectedContentType?.[0] || 'article');
-          const wordLimit = draftIntent.wordLimit || undefined;
-          const audienceTone = draftIntent.audienceTone || undefined;
-          
-          this.draftWorkflowService.startQuickDraftConversation(
-            topic,
-            contentType,
-            undefined,
-            wordLimit,
-            audienceTone
-          );
+    
+    # Get selected sources array
+    selected_sources = proprietary_config.get("sources", [])
+    
+    if not selected_sources:
+        logger.warning("[Proprietary Agent] isSelected is True but sources array is empty")
+        return {
+            "tool_results": {
+                "proprietary": {}
+            }
         }
-        return;
-      }
-    }
- 
     
-    // Default chat flow - clear file only if not used by workflow
-    this.uploadedFile = null;
-    this.isLoading = true;
-
-    const assistantMessage: Message = {
-      role: 'assistant',
-      content: '',
-      timestamp: new Date(),
-      isStreaming: true
-    };
-    this.messages.push(assistantMessage);
-
-    // Unsubscribe from any previous streaming if user switches tabs
-    if (this.currentStreamingSubscription) {
-      this.currentStreamingSubscription.unsubscribe();
-    }
-
-    this.currentStreamingSubscription = this.chatService.streamChat(
-      this.messages.slice(0, -1),
-      this.userId,
-      this.dbSessionId,
-      this.dbThreadId || undefined
-    ).pipe(
-      takeUntil(this.destroy$)
-    ).subscribe({
-      next: (chunk: string) => {
-        assistantMessage.content += chunk;
-        this.messageList?.triggerScrollToBottom();
-      },
-      error: (error) => {
-        console.error('Error sending message:', error);
-        assistantMessage.isStreaming = false;
-        assistantMessage.content = 'I apologize, but I encountered an error. Please try again.';
-        this.isLoading = false;
-        this.currentStreamingSubscription = null;
-      },
-      complete: () => {
-        assistantMessage.isStreaming = false;
-        this.saveCurrentSession();
-        this.isLoading = false;
-        this.currentStreamingSubscription = null;
-      }
-    });
-  }
-
-  onFileSelected(file: File): void {
-    this.uploadedFile = file;
-  }
-
-  onFileRemoved(): void {
-    this.uploadedFile = null;
-  }
-
-  onEditorsSubmitted(selectedIds: string[]): void {
-    this.editWorkflowService.handleEditorSelection(selectedIds);
-  }
-
-  onQuickActionClick(action: string): void {
-    console.log('Quick action clicked:', action);
-    // Handle quick action - can expand to show forms
-  }
-
-  onQuickStart(): void {
-    // Initialize quick start flow
-    this.userInput = 'I need help creating a presentation';
-  }
-
-  onGuidedJourney(): void {
-    console.log('[ChatComponent] TL Guided journey initiated');
-    this.currentJourney = 'thought-leadership';
-    this.currentWorkflows = TL_WORKFLOWS;
-    this.showGuidedDialog = true;
-  }
-
-  onDdcGuidedJourney(): void {
-    console.log('[ChatComponent] DDC Guided journey initiated');
-    this.currentJourney = 'ddc';
-    this.currentWorkflows = DDC_WORKFLOWS;
-    this.showGuidedDialog = true;
-  }
-
-  closeGuidedDialog(): void {
-    this.showGuidedDialog = false;
-    this.currentJourney = null;
-    this.currentWorkflows = [];
-  }
-
-  onWorkflowSelected(workflowId: string): void {
-    console.log(`[ChatComponent] Workflow selected: ${workflowId}, Journey: ${this.currentJourney}`);
+    logger.info(f"[Proprietary Agent] Processing {len(selected_sources)} sources")
+    logger.info(f"[Proprietary Agent] Research Topics: {research_topics}")
+    logger.info(f"[Proprietary Agent] Research Guidelines: {research_guidelines}")
+    logger.info(f"[Proprietary Agent] Selected Sources: {selected_sources}")
     
-
-    if (this.currentJourney === 'thought-leadership') {
-      // If workflow is draft-content, try to use detected topic/contentType
-      if (workflowId === 'draft-content') {
-        // Use last detected topic/contentType if available
-        const topic = this.tlFlowService.preselectedTopic;
-        const contentType = this.tlFlowService.preselectedContentType;
-        this.tlFlowService.openFlow(workflowId as any, contentType || undefined, topic || undefined);
-      } else {
-        this.tlFlowService.openFlow(workflowId as any);
-      }
-    } else if (this.currentJourney === 'ddc') {
-      this.ddcFlowService.openFlow(workflowId as any);
-    }
+    # Process each selected source directly (like tavily_tool_node pattern)
+    results = {}
     
-    this.closeGuidedDialog();
-  }
+    try:
+        for source_name in selected_sources:
+            # Get tool function for this source
+            tool_func = PROPRIETARY_TOOLS_MAP.get(source_name)
+            
+            if not tool_func:
+                logger.warning(f"[Proprietary Agent] Tool not found for source: {source_name}, skipping")
+                continue
+            
+            try:
+                # Directly invoke the tool (like tavily calls its API)
+                tool_result = tool_func.invoke({
+                    "query": research_topics,
+                    "guidelines": research_guidelines
+                })
+                
+                # Build prompt to extract ResearchSignals from tool result
+                prompt = f"""
+Analyze the following proprietary source research data and extract market intelligence signals.
 
-  // Legacy method for backwards compatibility
-  onTLActionCardClick(flowType: string): void {
-    this.closeGuidedDialog();
-    if (flowType === 'draft-content') {
-      const topic = this.tlFlowService.preselectedTopic;
-      const contentType = this.tlFlowService.preselectedContentType;
-      this.tlFlowService.openFlow(flowType as any, contentType || undefined, topic || undefined);
-    } else {
-      this.tlFlowService.openFlow(flowType as 'draft-content' | 'conduct-research' | 'edit-content' | 'refine-content' | 'format-translator');
-    }
-  }
+SOURCE: {source_name}
+RESEARCH TOPIC: {research_topics}
+RESEARCH GUIDELINES: {research_guidelines}
 
-  // Chat History Methods
-  loadSessions(): void {
-    try {
-      const stored = localStorage.getItem(this.STORAGE_KEY);
-      if (stored) {
-        this.savedSessions = JSON.parse(stored);
-      }
-    } catch (error) {
-      console.error('Error loading sessions:', error);
-      this.savedSessions = [];
-    }
-  }
+TOOL RESULT DATA:
+{tool_result}
 
-  saveCurrentSession(): void {
-    if (this.messages.length <= 1) return;
+Extract structured market intelligence signals:
+- facts: Key factual information
+- statistics: Numerical data, metrics, percentages
+- trends: Emerging patterns, directional changes
+- risks: Potential threats, concerns, challenges
+- opportunities: Growth areas, potential benefits
+- citations: Source references, URLs, document links
 
-    const session: ChatSession = {
-      id: this.currentSessionId || this.generateSessionId(),
-      title: this.generateSessionTitle(),
-      messages: [...this.messages],
-      timestamp: new Date(),
-      lastModified: new Date()
-    };
-
-    this.currentSessionId = session.id;
-
-    const existingIndex = this.savedSessions.findIndex(s => s.id === session.id);
-    if (existingIndex >= 0) {
-      this.savedSessions[existingIndex] = session;
-    } else {
-      this.savedSessions.unshift(session);
-      if (this.savedSessions.length > this.MAX_SESSIONS) {
-        this.savedSessions = this.savedSessions.slice(0, this.MAX_SESSIONS);
-      }
-    }
-
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.savedSessions));
-    } catch (error) {
-      console.error('Error saving session:', error);
-    }
-  }
-
-  loadSession(sessionId: string): void {
-    const session = this.savedSessions.find(s => s.id === sessionId);
-    if (session) {
-      this.messages = [...session.messages];
-      this.currentSessionId = session.id;
-      this.showHistoryPanel = false;
-    }
-  }
-
-  deleteSession(sessionId: string): void {
-    this.savedSessions = this.savedSessions.filter(s => s.id !== sessionId);
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.savedSessions));
-    } catch (error) {
-      console.error('Error deleting session:', error);
-    }
-
-    if (this.currentSessionId === sessionId) {
-      this.currentSessionId = null;
-      this.initializeChat();
-    }
-  }
-
-  toggleHistoryPanel(): void {
-    this.showHistoryPanel = !this.showHistoryPanel;
-    // Load database sessions when opening history panel
-    if (this.showHistoryPanel) {
-      this.loadDbSessions();
-    }
-  }
-
-  // ===== Database-Driven Chat History Methods =====
-  // These methods load chat history from the database (lazy loading)
-
-  /**
-   * Load all chat session summaries from database for current user.
-   * Only loads titles and metadata, NOT full conversations (lazy loading).
-   * Called when user opens history panel or logs in.
-   */
-  loadDbSessions(): void {
-    this.isLoadingDbSessions = true;
-    
-    console.log('[ChatComponent] Loading database sessions for user:', this.userId);
-    
-    this.chatService.getUserSessions(
-      this.userId,
-      this.selectedSourceFilter || undefined
-    ).pipe(
-      takeUntil(this.destroy$)
-    ).subscribe({
-      next: (sessions: ChatSessionSummary[]) => {
-        // Convert ChatSessionSummary to ChatSession format for compatibility with sidebar
-        this.dbChatSessions = (sessions || []).map(s => ({
-          id: s.session_id,
-          title: s.title || s.preview,
-          messages: [], // Empty - full conversation loaded on-demand
-          timestamp: new Date(s.created_at),
-          lastModified: new Date(s.updated_at)
-        }));
+Output MUST follow the ResearchSignals schema exactly.
+"""
+                
+                # Use LLM to extract structured signals (like tavily_tool_node)
+                signals = call_llm(prompt)
+                results[source_name] = signals
+                
+                logger.info(f"[Proprietary Agent] Processed {source_name}")
+                
+            except Exception as e:
+                logger.error(f"[Proprietary Agent] Error processing {source_name}: {e}")
+                # Continue with other sources even if one fails
+                continue
         
-        this.isLoadingDbSessions = false;
-        console.log(`[ChatComponent] ✅ Successfully loaded ${this.dbChatSessions.length} sessions from database`);
-        console.log('[ChatComponent] Sessions:', this.dbChatSessions);
-      },
-      error: (error: any) => {
-        console.error('[ChatComponent] ❌ Error loading sessions from database:', error);
-        console.error('[ChatComponent] Error details:', error.message);
-        this.isLoadingDbSessions = false;
-        this.dbChatSessions = [];
-      }
-    });
-  }
-
-  /**
-   * Load full conversation for a specific session from database.
-   * Called only when user clicks on a session in history.
-   * @param sessionId Session identifier
-   */
-  loadDbConversation(sessionId: string): void {
-    this.isLoadingDbConversation = true;
-    
-    console.log('[ChatComponent] Loading conversation for session:', sessionId);
-    
-    this.chatService.getSessionConversation(sessionId).pipe(
-      takeUntil(this.destroy$)
-    ).subscribe({
-      next: (sessionData: ChatSessionDetail) => {
-        // Load messages from database session
-        if (sessionData && sessionData.conversation && sessionData.conversation.messages) {
-          this.messages = sessionData.conversation.messages;
-          this.currentSessionId = sessionData.session_id;
-          this.showHistoryPanel = false;
-          this.isLoadingDbConversation = false;
-          console.log(`[ChatComponent] ✅ Loaded conversation from database: ${sessionId}`);
-          console.log(`[ChatComponent] Messages count: ${this.messages.length}`);
-        }
-      },
-      error: (error: any) => {
-        console.error(`[ChatComponent] ❌ Error loading conversation for session ${sessionId}:`, error);
-        this.isLoadingDbConversation = false;
-      }
-    });
-  }
-
-  /**
-   * Delete a chat session from database.
-   * @param sessionId Session identifier
-   */
-  deleteDbSession(sessionId: string): void {
-    this.chatService.deleteSession(sessionId).pipe(
-      takeUntil(this.destroy$)
-    ).subscribe({
-      next: () => {
-        // Remove from local list
-        this.dbChatSessions = this.dbChatSessions.filter(
-          (s: any) => s.session_id !== sessionId
-        );
+        logger.info(f"[Proprietary Agent] Completed. Results for {len(results)} sources")
         
-        if (this.currentSessionId === sessionId) {
-          this.currentSessionId = null;
-          this.initializeChat();
+        # Return in format that graph.py will merge automatically
+        # The merge_tool_results function will merge this with results from other nodes
+        return {
+            "tool_results": {
+                "proprietary": results
+            }
         }
         
-        console.log(`[ChatComponent] Deleted session from database: ${sessionId}`);
-      },
-      error: (error: any) => {
-        console.error(`[ChatComponent] Error deleting session ${sessionId}:`, error);
-      }
-    });
-  }
-
-  /**
-   * Filter database chat sessions by source.
-   * Called when user selects a source filter in history panel.
-   * @param source Source filter (Chat, DDDC, Thought_Leadership, etc.)
-   */
-  filterDbSessionsBySource(source: string): void {
-    this.selectedSourceFilter = source;
-    this.loadDbSessions();
-  }
+    except Exception as e:
+        logger.error(f"[Proprietary Agent] Error: {e}", exc_info=True)
+        return {
+            "tool_results": {
+                "proprietary": {}
+            }
+        }
 
 
-  private generateSessionId(): string {
-    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
+# =========================================================
+# 8. TAVILY TOOL NODE (REAL EXTERNAL SEARCH)
+# =========================================================
 
-  private generateSessionTitle(): string {
-    const userMessages = this.messages.filter(m => m.role === 'user');
-    if (userMessages.length > 0) {
-      const firstMessage = userMessages[0].content;
-      return firstMessage.substring(0, 50) + (firstMessage.length > 50 ? '...' : '');
-    }
-    return 'New Chat';
-  }
+def tavily_tool_node(state: GraphState) -> dict:
+    query = state.input.get("research_topics")
+    guidelines = state.input.get("research_guidelines", "")
 
-  get showWelcome(): boolean {
-    return this.messages.length <= 1;
-  }
+    response = tavily.search(
+        query=query,
+        search_depth="advanced",
+        max_results=5,
+    )
 
-  /**
-   * Detect if user input is a rewrite/regenerate intent
-   */
-  private isRewriteIntent(input: string): boolean {
-    const lowerInput = input.toLowerCase();
-    const rewriteKeywords = ['rewrite', 'regenerate', 'again', 'try again', 'different', 'change it', 'redo', 'remake', 'rethink'];
-    return rewriteKeywords.some(keyword => lowerInput.includes(keyword));
-  }
+    contents = [
+        r.get("content", "")
+        for r in response.get("results", [])
+        if r.get("content")
+    ]
 
-  /**
-   * Format content type to proper case (e.g., 'article' -> 'Article')
-   */
-  private formatContentType(type: string): string {
-    if (!type) return 'Article';
-    
-    // Map lowercase to proper names
-    const typeMap: { [key: string]: string } = {
-      'article': 'Article',
-      'blog': 'Blog',
-      'white paper': 'White Paper',
-      'white_paper': 'White Paper',
-      'executive brief': 'Executive Brief',
-      'executive_brief': 'Executive Brief'
-    };
+    prompt = f"""
+Analyze the following external web research content.
 
-    return typeMap[type.toLowerCase()] || type.charAt(0).toUpperCase() + type.slice(1);
-  }
+GUIDELINES:
+{guidelines}
 
-  /**
-   * Analyze user response to draft satisfaction question
-   * Returns: { isPositive: boolean, hasImprovementRequest: boolean, improvementText: string }
-   */
-  private analyzeDraftSatisfactionResponse(input: string): { isPositive: boolean, hasImprovementRequest: boolean, improvementText: string } {
-    const lowerInput = input.toLowerCase().trim();
-    
-    console.log('[ChatComponent] Analyzing satisfaction response:', { input, lowerInput });
-    
-    // Positive responses - explicitly list what counts as satisfied
-    const positiveKeywords = ['yes', 'yeah', 'yep', 'good', 'great', 'perfect', 'satisfied', 'happy', 'love', 'excellent', 'looks good', 'that\'s good', 'that\'s great', 'that works', 'that\'s perfect', 'accept', 'approved', 'ok', 'okay'];
-    
-    // Check if it contains negative indicators
-    const hasNegative = lowerInput.includes('no') || lowerInput.includes('not') || lowerInput.includes('don\'t') || lowerInput.includes('doesn\'t');
-    
-    // Only consider it positive if it has a positive keyword AND no negative indicators
-    const hasPositiveKeyword = positiveKeywords.some(keyword => lowerInput.includes(keyword));
-    const isPositive = hasPositiveKeyword && !hasNegative;
-    
-    console.log('[ChatComponent] Satisfaction analysis - hasPositiveKeyword:', hasPositiveKeyword, 'hasNegative:', hasNegative, 'isPositive:', isPositive);
-    
-    // If it looks like a positive response, return that
-    if (isPositive) {
-      console.log('[ChatComponent] → Classified as POSITIVE response');
-      return { isPositive: true, hasImprovementRequest: false, improvementText: '' };
-    }
-    
-    // Otherwise, treat it as an improvement request
-    const hasImprovementRequest = !isPositive;
-    console.log('[ChatComponent] → Classified as IMPROVEMENT REQUEST');
-    
+CONTENT:
+{chr(10).join(contents)}
+"""
+
+    signals = call_llm(prompt)
+
     return {
-      isPositive: false,
-      hasImprovementRequest: hasImprovementRequest,
-      improvementText: input
-    };
-  }
-}
+        "tool_results": {
+            "externalResearch": {
+                "tavily": signals
+            }
+        }
+    }
+
+
+# =========================================================
+# 9. ROUTER
+# =========================================================
+
+def router_node(state: GraphState) -> dict:
+    return {}
+
+
+def router_decision(state: GraphState) -> List[str]:
+    routes = []
+
+    # Check pwc_content selection
+    pwc_content_selected = state.input.get("pwc_content", {}).get("isSelected", False)
+    if pwc_content_selected:
+        routes.append("pwc_document")
+        # Auto-select proprietary if pwc_content is selected
+        proprietary_config = state.input.get("proprietary", {})
+        if not proprietary_config.get("isSelected", False):
+            proprietary_config["isSelected"] = True
+            # If sources array is empty, add default sources
+            if not proprietary_config.get("sources"):
+                proprietary_config["sources"] = [
+                    "PwC Industry Edge",
+                    "PwC Insights",
+                    "s+b Journal",
+                    "Executive Leadership Hub",
+                    "The Exchange",
+                    "PwC Connected Source",
+                    "PwC Benchmarking",
+                    "Insights Factory",
+                    "PwC Intelligence",
+                    "Client Success Stories",
+                    "Inside Industries",
+                    "Value Store"
+                ]
+            logger.info("[Router] Auto-selected proprietary because pwc_content is selected")
+
+    # If proprietary is selected, route to proprietary agent
+    proprietary_selected = state.input.get("proprietary", {}).get("isSelected", False)
+    if proprietary_selected:
+        routes.append("proprietary")
+
+    if state.input.get("thirdParty", {}).get("isSelected"):
+        routes.append("thirdParty")
+
+    if state.input.get("externalResearch", {}).get("isSelected"):
+        routes.append("externalResearch")
+
+    return routes
+
+
+# =========================================================
+# 10. BUILD GRAPH
+# =========================================================
+
+def build_graph():
+    graph = StateGraph(GraphState)
+
+    # Router
+    graph.add_node("router", router_node)
+
+    # PwC internal document
+    graph.add_node(
+        "pwc_document",
+        make_llm_tool_node(
+            "pwc_content",
+            "document_llm",
+            pwc_document_prompt,
+        )
+    )
+
+    # Proprietary agent with dynamic tool calling
+    graph.add_node("proprietary", proprietary_agent_node)
+
+    # Third-party (placeholder: Factiva / Capital IQ APIs)
+    graph.add_node(
+        "thirdParty",
+        make_llm_tool_node(
+            "thirdParty",
+            "Factiva",
+            lambda inp: generic_tool_prompt("Factiva", inp),
+        )
+    )
+
+    # External Research (REAL Tavily)
+    graph.add_node("externalResearch", tavily_tool_node)
+
+    # Entry
+    graph.set_entry_point("router")
+
+    # Conditional fan-out
+    graph.add_conditional_edges(
+        "router",
+        router_decision,
+        {
+            "pwc_document": "pwc_document",
+            "proprietary": "proprietary",
+            "thirdParty": "thirdParty",
+            "externalResearch": "externalResearch",
+        },
+    )
+
+    # Fan-out ends
+    graph.add_edge("pwc_document", END)
+    graph.add_edge("proprietary", END)
+    graph.add_edge("thirdParty", END)
+    graph.add_edge("externalResearch", END)
+
+    return graph.compile()
+
+
+# =========================================================
+# 10. TEST DATA
+# =========================================================
+
+def get_test_input() -> dict:
+    """Returns sample test input data for graph execution."""
+    return {
+        "research_topics": "AI in finance",
+        "research_guidelines": "focus on agentic systems",
+        "pwc_content": {
+            "isSelected": True,
+            "supportingDoc": "The integration of Artificial Intelligence (AI) into financial services represents a developmental shift in the industry, presenting unprecedented opportunities and challenges. This scientometric review examines the evolution of AI in finance from 1989 to 2024, analyzing its pivotal applications in credit scoring, fraud detection, digital insurance, robo-advisory services, and financial inclusion. The analysis reveals significant trends, particularly the growing adoption of machine learning, natural language processing, and blockchain technologies in reshaping financial operations and decision-making processes. The review addresses critical regulatory and ethical challenges, emphasizing the imperative for explainable AI (XAI) and robust governance frameworks to ensure transparency, fairness, and accountability in AI-driven systems. Despite rapid advancements, persistent gaps remain, the most notable of which is the lack of standardized frameworks for AI implementation across financial sectors. The findings support the need for a balanced approach that promotes innovation while addressing ethical, regulatory, and societal concerns. This comprehensive synthesis maps the trajectory of AI in finance, identifies key areas for future research, and recommends interdisciplinary collaboration to advance responsible and sustainable AI integration within the financial ecosystem.\nSimilar content being viewed by others\nFinance centralization—research on enterprise intelligence\nArticle Open access13 November 2024\nAI reshaping financial modeling\nArticle Open access01 October 2025\nRevolutionizing finance with conversational AI: a focus on ChatGPT implementation and challenges\nArticle Open access19 March 2025\nIntroduction\nArtificial Intelligence (AI) has emerged as a disruptive force in modern finance and has almost completely overhauled how operations are carried out in the industry (Tao et al., 2021). AI, which typically involves technologies such as machine learning, deep learning, and natural language processing, now dictates the mediums for financial functions. Its impact cuts across a wide range of applications—from algorithmic trading and fraud detection to customer service chatbots and robo-advisors (Ranković et al., 2023).\nThis rise in adoption is also evident in the projected doubling of financial institutions' AI expenditure, expected to reach $97 billion by 2027 (Kearns, 2023). With an estimated compound annual growth rate (CAGR) of 29.6%, the financial sector is now the fastest-growing industry globally in terms of AI investment (La Croce, 2023). This exponential growth has prompted leading financial firms such as JPMorgan and Morgan Stanley Wealth Management to establish their AI infrastructures, recognizing the technology's transformative potential (Kearns, 2023). However, this transformative potential presents a paradox: while AI is capable of driving breakthrough performances, it also harbors systemic risks that depends primarily on how it is regulated and ethically deployed (Ahern, 2021; Arner et al., 2020; Berdiyeva et al., 2021).\nRecent developments in advanced AI models, such as ChatGPT and DeepSeek, reinforce the argument for the immense benefits that can be derived from AI technologies; however, their cross-border and pervasive nature also introduces novel risks that demand careful scrutiny to prevent potential widespread crises (Bahoo et al., 2024). One such critical risk is the issue of human oversight. Effective oversight requires that human decision-makers possess the ability to interpret and evaluate AI-generated outputs, to accept, reject, or modify AI recommendations based on ethical, legal, and practical considerations (Černevičienė & Kabašinskas, 2024). This ensures that ultimate responsibility remains with human operators, who can intervene to mitigate adverse outcomes and align AI applications with ethical standards. Such oversight not only ensures accountability but also enhances the responsible use of AI technologies, guarding against risks while fostering trust in AI-driven financial systems (Max et al., 2021).\nAs AI in finance continues through its adoption and growth phase, it is expected that its full benefits and potential threats will become more apparent over time. This dynamic has spurred a significant surge in AI finance publications in recent years, as researchers strive to address literature gaps and identify emerging trajectories to advance the field (Goodell et al., 2023). Over the past two decades, the volume of publications has risen considerably, from an annual average of 29 to 178 articles, based on our dataset. These studies explore a wide range of topics, including optimal financial models, associated risks, and diverse applications across various facets of finance.\nSince the early 1990s, when scientific research on AI in finance first emerged, numerous technologies have been adopted, redefined or replaced in response to the evolving needs of financial markets. Concurrently, the terminology and focus of research have shifted to mirror this changing landscape (Leone & de Medeiros, 2015). For researchers and finance professionals, understanding both foundational and niche themes in AI is crucial to developing technologies and research that align with current trends and dynamics. Against this backdrop, this study examines trends in AI finance research to identify key stakeholders, influential topics, and areas that are prime for further exploration to provide a structured analysis of research gaps and development trajectories.\nMajor research gaps remain in the literature, particularly in understanding the evolving regulatory landscape and ethical considerations surrounding AI-based finance (Brummer and Gorfine). The fast pace of AI application adoption demands that current regulatory frameworks and ethical dilemmas are critically examined, including issues of algorithmic bias and fairness (Friedler et al., 2019). Addressing these issues is essential to ensuring the responsible development and deployment of AI technologies in finance and protecting the interests of both financial institutions and consumers (Pithadia, 2021).\nRegulators face considerable challenges in understanding the underlying mechanisms of complex AI systems, complicating their efforts to establish effective oversight. Similarly, consumers struggle to decipher the reasoning behind AI-generated outputs in their decision-making process. These challenges led to the emergence of Explainable Artificial Intelligence (XAI), which prioritizes transparency and interpretability in AI models (Chen et al., 2023). Moreover, the rapid pace of AI technology advancements implies that regulatory frameworks are continuously updated, which imposes substantial costs on regulatory bodies. Other regulatory challenges include ambiguous regulations (Arner, 2019), data privacy and security concerns (Lopez & Alcaide, 2020), and the lack of global regulatory harmonization (Erdélyi & Goldsmith, 2018) —factors that collectively threaten the effective and ethical use of AI in finance. The 2008 financial crisis—triggered by lax oversight, complex financial products and inadequate risk assessment—serve as a stark reminder of the consequences of regulatory failures (Vukovic et al., 2019; Gorton & Metrick, 2012). The 2010 Flash Crash also further exemplifies the risks posed by inadequately regulated AI-driven systems in causing sudden and severe market disruptions (Frömmel, 2022).\nThis study addresses these critical gaps through a comprehensive literature review, employing a scientometric approach to analyze the existing body of research on AI in finance. The primary objectives are twofold: (1) to identify prevailing research trends and prospects in AI finance, and (2) to investigate the applications, regulatory frameworks, and ethical considerations associated with AI in finance. The scientometric methodology provides a robust, objective framework for analyzing trends and identifying gaps in AI-based finance research. Through this approach, the study makes several novel contributions to literature. First, it employs a larger and more recent dataset to provide an up-to-date perspective on AI in finance developments. Second, it analyzes evolving trends in AI techniques, offering insights into the field's technological progression, influential contributors, and potential areas for research (Bahoo et al., 2024). Third, by examining regulatory frameworks and ethical considerations, the study provides a guiding framework for responsible AI integration in finance. These insights are crucial for promoting innovative financial technology, robust governance standards and enhancing trust in AI-driven financial systems.\nThe next parts of this paper are structured as follows: Section 2 reviews the relevant literature, to provide a foundation for understanding the key themes and developments. Section 3 outlines the research methodology to describe the data sources and analytical approaches employed in this study. Section 4 presents the main findings, combining scientometric and content analyses to reveal trends and patterns in AI finance research. Section 5 delves into the regulation of AI in finance, synthesizing critical studies and highlighting key gaps. Finally, Section 6 concludes the paper by discussing the implications of the findings and proposing avenues for future research.\nLiterature background\nArtificial intelligence in finance: evolution, impact, and regulatory perspectives\nEarly literature conceptualized AI primarily as a tool for automation. However, with the introduction of advanced algorithms and computational models, AI has evolved into a more comprehensive tool in recent studies (Johnson et al., 2019; Arslanian & Fischer, 2019). This evolution has resulted in the development of several theoretical frameworks for understanding AI's role in finance. The mechanistic viewpoint focuses on AI's capacity for automating routine tasks through rule-based systems to streamline operational efficiency within financial institutions. In contrast, the predictive analytics viewpoint highlights AI's ability to support market analysis and decision-making, particularly through machine learning applications (Wang et al., 2021). These divergent conceptualizations demonstrate AI's complexity and its varied applications across different financial domains.\nThe technological foundation underlying AI financial applications has evolved through distinct phases, each marked by significant advances in computing power, data availability, and algorithmic sophistication (Arner et al., 2020). Contemporary AI systems in finance are distinguished by their ability to process and analyze vast datasets in real-time, leveraging multiple technological components that work in concert. Machine learning models extract patterns from historical data, while natural language processing (NLP) algorithms decode unstructured textual information. Neural networks, designed to mimic human cognitive processes, enable these systems to handle increasingly complex analytical tasks (Zhang et al., 2021). This technological convergence has enabled AI to transcend its initial role in basic process automation and emerge as a sophisticated tool for financial analysis and decision-making.\nThe historical trajectory of AI in finance demonstrates how technological advancement has fundamentally altered financial services delivery and operations. The evolution progressed from basic rule-based automation systems in the initial stages to increasingly sophisticated applications incorporating predictive analytics and machine learning (Johnson et al., 2019). This change was more than just technical; it represented a vital shift in how financial institutions approached data analysis, risk assessment, and decision-making processes. The progression from automated task execution to complex predictive modeling shows the technology's expanding capabilities and its growing strategic significance in financial operations.\nContemporary developments in AI finance are marked by several interconnected trends that are reshaping industry practices. Natural Language Processing (NLP) and sentiment analysis are used to understand textual data, enabling financial institutions to gauge market sentiment and make informed investment decisions (Gao et al., 2021). Explainable AI (XAI) has gained prominence as a critical factor in ensuring regulatory compliance and building user trust by making AI algorithms more interpretable (Chen et al., 2023). Robotic Process Automation (RPA) is streamlining back-office operations, reducing costs, and improving efficiency (Madakam et al., 2019). Additionally, AI-driven chatbots and virtual assistants are enhancing customer interactions by providing personalized services and resolving queries more efficiently (Iovine et al., 2023). Algorithmic trading, powered by AI, is optimizing investment strategies, offering greater precision and speed in executing trades (Arner, 2019). These trends collectively reflect the integration of different AI applications to improve the financial sector.\nLooking ahead, the financial industry is set to be influenced by a number of new developments in AI. For instance, quantum computing promises to deliver unmatched computational power for complex financial modeling and optimization (Woerner & Egger, 2019). AI-based fraud detection systems are evolving through advanced anomaly detection algorithms to enhance security and mitigate risks (El Hajj & Hammoud, 2023). Continuous advancements in neural networks and deep learning are expanding AI's ability to analyze unstructured data, such as images and audio, for applications in fraud prevention and customer service. Augmented Intelligence, which emphasizes collaboration between humans and AI, is gaining traction as a decision-support tool in complex financial scenarios (Tao et al., 2021). Furthermore, the integration of blockchain and AI is paving the way for decentralized, transparent, and secure solutions, particularly in areas such as smart contracts and digital identity (Kshetri, 2021). These emerging trends highlight the ongoing evolution of AI in finance, pointing to a future where its influence will be more pervasive and transformative.\nThese developments of AI in finance have also been extensively studied through bibliometric approaches. Seminal works by Chen et al. (2023), Tao et al. (2021), Goodell et al. (2021), and Ahmed et al. (2022) have explored the foundational elements, thematic underpinnings, and research clusters in AI literature. These studies employ techniques such as co-citation analysis, bibliometric coupling, NLP-based bibliometric approaches, and integrated CiteSpace analysis to uncover evolving research trends in AI-based finance. Chen et al. (2023), for instance, focus on Explainable AI (XAI) in finance, noting a significant increase in publications since 2013. Their research notes a transition from traditional finance research toward more inclusive and diversified applications, accompanied by improvements in non-interpretable models and a growing emphasis on risk and ethical considerations. Other studies also identify three principal literature clusters within AI finance: (1) portfolio construction, computation, and investor behavior; (2) financial fraud and distress; and (3) sentiment inference, forecasting, and planning. These clusters show the major applications of AI in finance (Goodell et al., 2021). Ahmed et al. (2022) observe a surge in literature on Machine Learning (ML) and AI finance, with the United States, China, and the United Kingdom emerging as the top contributors. This global distribution of research highlights the international significance and interest in AI applications within finance, and the leading role these countries play in its exploration and development.\nThe global perspectives, however, vary on how AI is regulated. Efforts to address ethical concerns, regulatory gaps, and privacy issues related to AI applications have revealed divergent views across different regions, with limited literature available to quantitatively or qualitatively determine the best approaches (Lee, 2020). The European Banking Institute advocates for robust and centralized governance to address risks and regulatory fragmentation, particularly in cross-border FinTech trade, while the United States has adopted a more decentralized approach that raises concerns about standardization and harmonization (Azzutti et al., 2022; Ahern, 2021). The issue of regulatory arbitrage has also emerged from this disconnect, with AI platforms for tokenization, crowdfunding and cryptocurrencies being at the forefront of providing unfair advantages to some users. Explainable AI (XAI) has been proposed to help regulators access sufficient information for better-informed regulations. Regulatory Technology (RegTech) is also emerging as a potential solution to streamline AI compliance, while regulatory sandboxes are facilitating innovation and testing in controlled environments (Boukherouaa et al., 2021; Lee, 2020). Nevertheless, measuring the performance of AI regulation remains challenging due to the lack of standardized metrics. Current trends suggest a shift toward risk-oriented regulatory approaches that prioritizes flexibility and adaptability in governing AI in finance. As the financial industry continues to embrace AI, the literature on AI regulation is expected to evolve, offering new insights into the ongoing transformation of the financial landscape and addressing the critical balance between innovation and ethics. This study aims to explore this dynamic, laying the groundwork for future research, policy discussions, and AI development in finance. By doing so, it seeks to make a pioneering contribution to the field.",
+            "supportingDoc_instructions": "focus on first 3 modules in the document",
+            "research_links": "http://localhost:8080/docs#/Chat/chat_api_v1_chat_post"
+        },
+        "proprietary": {"isSelected": False},
+        "thirdParty": {"isSelected": False},
+        "externalResearch": {"isSelected": False},
+    }
+
+
+# =========================================================
+# 11. RUN
+# =========================================================
+
+if __name__ == "__main__":
+    graph = build_graph()
+    raw_input = get_test_input()
+    result = graph.invoke(GraphState(input=raw_input))
+    print(jsonable_encoder(result["tool_results"]))
